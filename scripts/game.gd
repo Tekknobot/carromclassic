@@ -60,14 +60,22 @@ var sound_pocket: AudioStreamPlayer
 var sound_click: AudioStreamPlayer
 var title_label: Label
 var board_caption: Label
+var board_style_index: int = 0
+var board_style_label: Label
+var board_style_prev: Button
+var board_style_next: Button
+const SETTINGS_PATH := "user://carrom_board_settings.cfg"
 var tip_label: Label
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
+	_load_board_style()
 	board = BOARD_SCENE.new()
 	add_child(board)
+	board.set_style(board_style_index)
 	_build_ui()
 	_build_audio()
+	_refresh_board_style_ui()
 	_new_match()
 	_layout()
 	queue_redraw()
@@ -168,6 +176,24 @@ func _build_ui() -> void:
 	scroll.add_child(content)
 	_label(content, "THE MATCH", 11, MINT)
 	match_info = _label(content, "BOARD 1 OF 8   |   FIRST TO 25", 14, TEXT)
+	# A dedicated cosmetic selector: usable during every phase of the match.
+	# "NEXT" wraps from theme 8 back to the untouched original theme 1.
+	_label(content, "BOARD APPEARANCE", 11, MINT)
+	var board_style_row := HBoxContainer.new()
+	board_style_row.add_theme_constant_override("separation", 7)
+	content.add_child(board_style_row)
+	board_style_prev = _make_button(board_style_row, "PREV")
+	board_style_prev.custom_minimum_size.x = 58
+	board_style_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	board_style_prev.pressed.connect(func() -> void: _cycle_board_style(-1))
+	board_style_label = _label(board_style_row, "01 / 08   CLASSIC TOURNAMENT", 12, TEXT, true)
+	board_style_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	board_style_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	board_style_label.custom_minimum_size.y = 45
+	board_style_next = _make_button(board_style_row, "NEXT", true)
+	board_style_next.custom_minimum_size.x = 58
+	board_style_next.size_flags_horizontal = Control.SIZE_SHRINK_END
+	board_style_next.pressed.connect(func() -> void: _cycle_board_style(1))
 	var scores := HBoxContainer.new()
 	scores.add_theme_constant_override("separation", 10)
 	content.add_child(scores)
@@ -183,7 +209,7 @@ func _build_ui() -> void:
 	var queen_row := HBoxContainer.new()
 	queens.add_child(queen_row)
 	var queen_dot := Label.new()
-	queen_dot.text = "●"
+	queen_dot.text = "Q"
 	queen_dot.add_theme_font_size_override("font_size", 22)
 	queen_dot.add_theme_color_override("font_color", Color("#e45f62"))
 	queen_row.add_child(queen_dot)
@@ -303,6 +329,30 @@ func _layout() -> void:
 	var dialog_size := Vector2(minf(640, sz.x - 80), minf(790, sz.y - 50))
 	rules_overlay.position = (sz - dialog_size) * 0.5
 	rules_overlay.size = dialog_size
+
+func _load_board_style() -> void:
+	var config := ConfigFile.new()
+	if FileAccess.file_exists(SETTINGS_PATH) and config.load(SETTINGS_PATH) == OK:
+		board_style_index = clampi(int(config.get_value("appearance", "board_style", 0)), 0, CarromBoard.STYLE_NAMES.size() - 1)
+
+func _save_board_style() -> void:
+	var config := ConfigFile.new()
+	config.set_value("appearance", "board_style", board_style_index)
+	config.save(SETTINGS_PATH)
+
+func _refresh_board_style_ui() -> void:
+	if board_style_label != null:
+		board_style_label.text = "%02d / 08\n%s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]]
+	if board_caption != null:
+		board_caption.text = "STYLE %02d / 08  /  %s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]]
+
+func _cycle_board_style(step: int) -> void:
+	board_style_index = posmod(board_style_index + step, CarromBoard.STYLE_NAMES.size())
+	board.set_style(board_style_index)
+	_refresh_board_style_ui()
+	_save_board_style()
+	if sound_click != null:
+		sound_click.play()
 
 func _new_match() -> void:
 	board_number = 1
