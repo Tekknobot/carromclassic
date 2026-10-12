@@ -77,7 +77,7 @@ func _draw() -> void:
 
 func _draw_classic_board() -> void:
 	# Cast-shadow, solid wood frame, inner inset and warm playing veneer.
-	draw_rect(Rect2(-43, -34, 775, 774), Color(0.0, 0.0, 0.0, 0.28), true)
+	#draw_rect(Rect2(-43, -34, 775, 774), Color(0.0, 0.0, 0.0, 0.28), true)
 	draw_rect(Rect2(-43, -43, 766, 766), Color("#3f291e"), true)
 	draw_rect(Rect2(-37, -37, 754, 754), Color("#ac7444"), true)
 	draw_rect(Rect2(-29, -29, 738, 738), Color("#c8955c"), true)
@@ -131,7 +131,7 @@ func _draw_alternate_board() -> void:
 	var detail := _skin_color("detail")
 	var grain := _skin_color("grain")
 	# Constant outer dimensions and playable surface across every theme.
-	draw_rect(Rect2(-43, -34, 775, 774), Color(0, 0, 0, 0.33), true)
+	#draw_rect(Rect2(-43, -34, 775, 774), Color(0, 0, 0, 0.33), true)
 	draw_rect(Rect2(-43, -43, 766, 766), outer, true)
 	draw_rect(Rect2(-37, -37, 754, 754), rim, true)
 	draw_rect(Rect2(-29, -29, 738, 738), trim, true)
