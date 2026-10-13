@@ -96,6 +96,12 @@ mouse controls remain unchanged.
 ## Portrait mobile layout
 
 The phone UI keeps the nearly full-width board, large touch targets, and
-compact match information. The control labeled PULL BACK replaces the old
-timed CHARGE button. There is no need to hold, wait for a meter to fill, or
-use two fingers. Only the portrait input method changes.
+compact match information. The hamburger in the top-right corner opens a
+minimal menu for board styles, CPU difficulty, Rules, and Restart. Next Board
+appears there when the round ends. The status panel now sits ABOVE the board;
+only the power meter and PULL BACK gesture pad remain below it.
+
+Open the menu to change settings instantly, then tap CLOSE or outside to
+return to the board. Opening the menu safely cancels a partial pull instead
+of firing. The pull-back pad still shoots on finger release with no timer.
+Only the portrait UI changes; desktop retains its original controls.

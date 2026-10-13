@@ -1,13 +1,21 @@
-CARROM - MOBILE PULL-BACK CONTROLS
+CARROM - PORTRAIT MOBILE UI
 
-Mobile portrait only:
-1. Move the striker along the glowing baseline.
-2. Press PULL BACK under the board.
-3. Drag backward (down for an upward shot; left/right to steer).
-4. Drag further for greater power, then RELEASE to shoot.
-5. A very short drag cancels. No timed hold or automatic 100% shot.
+The compact three-line menu button at the upper right contains:
+- Board Design: PREV / NEXT for all eight Classic or Duboo styles.
+- CPU Difficulty: CASUAL / STANDARD / EXPERT, selected state highlighted.
+- Rules: opens the scrollable rules sheet.
+- Restart: starts a new match (or new Duboo board).
+- Next Board: appears in the menu when a Classic board ends.
 
-The gesture is captured by one finger. An undelivered touch release is
-cancelled after five seconds of inactivity, or when the browser loses focus.
+Tap CLOSE or outside the menu to dismiss it. ESC also closes it in browser.
+Opening the menu cancels any unfinished pull gesture without firing.
 
-Desktop mode, game rules, physics, sound, both board sets and CPU are unchanged.
+The game status has moved ABOVE the playing board. The only controls
+BELOW the board are shot power and the PULL BACK gesture pad.
+
+To shoot: place the striker on the lower baseline; touch PULL BACK,
+drag backward to choose direction and power, and lift the same finger.
+Short drags cancel. The menu is isolated from touch-shot handling.
+
+The desktop interface and rules, physics, CPU, sounds, and themes remain
+unchanged.

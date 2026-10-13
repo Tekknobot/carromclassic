@@ -19,6 +19,7 @@ const EDGE_SOFT := Color("#3b6055")
 const PANEL_LIFT := Color("#24443c")
 const MOBILE_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_mobile.png")
 const DESKTOP_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_desktop.png")
+const MOBILE_MENU_BUTTON := preload("res://scripts/mobile_menu_icon.gd")
 const MAX_BOARD_COUNT := 8
 const MATCH_TARGET := 25
 const MIN_SHOT_SPEED := 320.0
@@ -105,20 +106,20 @@ var mobile_power_panel: PanelContainer
 var mobile_power_label: Label
 var mobile_power_meter: ProgressBar
 var mobile_fire: Button
-var mobile_style_back: PanelContainer
-var mobile_style_bar: HBoxContainer
-var mobile_style_prev: Button
-var mobile_style_next: Button
-var mobile_style_name: Label
+# Mobile-only, top-right hamburger and an uncluttered settings sheet.
+var mobile_menu_button: Button
+var mobile_menu_scrim: ColorRect
+var mobile_menu_panel: PanelContainer
+var mobile_menu_open := false
+var mobile_menu_style_name: Label
+var mobile_menu_style_count: Label
+var mobile_menu_prev: Button
+var mobile_menu_next_style: Button
+var mobile_menu_difficulties: Array[Button] = []
+var mobile_menu_rules: Button
+var mobile_menu_restart: Button
+var mobile_menu_next_board: Button
 var mobile_mobile_scale := 1.0
-var mobile_difficulty_panel: PanelContainer
-var mobile_difficulty_row: HBoxContainer
-var mobile_difficulty_label: Label
-var mobile_action_bar: HBoxContainer
-var mobile_cpu_select: OptionButton
-var mobile_rules: Button
-var mobile_restart: Button
-var mobile_next: Button
 var mobile_board_finger := -1
 var mobile_board_mouse_down := false
 var mobile_drag_baseline := false
@@ -460,8 +461,7 @@ func _build_ui() -> void:
 	_style_cpu_option(cpu_selector, false)
 	cpu_selector.item_selected.connect(func(idx: int) -> void:
 		cpu_skill = idx
-		if mobile_cpu_select != null:
-			mobile_cpu_select.select(idx)
+		_mobile_refresh_menu()
 	)
 	content.add_child(cpu_selector)
 	# One concise controls reminder belongs below the board, not in the sidebar.
@@ -531,13 +531,16 @@ func _build_mobile_ui() -> void:
 	mobile_status_hint = _mobile_label(status_stack, "SLIDE THE STRIKER ON THE BASELINE", 10, TEXT)
 
 	mobile_power_panel = _mobile_panel()
-	var power_row := HBoxContainer.new()
-	power_row.add_theme_constant_override("separation", 14)
-	mobile_power_panel.add_child(power_row)
+	# Vertical shot dock: the power label and full-width meter are above a
+	# compact, centered pull pad. The pad is NOT stretched across the screen.
+	var power_column := VBoxContainer.new()
+	power_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	power_column.add_theme_constant_override("separation", 7)
+	mobile_power_panel.add_child(power_column)
 	var power_stack := VBoxContainer.new()
 	power_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	power_stack.add_theme_constant_override("separation", 9)
-	power_row.add_child(power_stack)
+	power_stack.add_theme_constant_override("separation", 6)
+	power_column.add_child(power_stack)
 	mobile_power_label = _mobile_label(power_stack, "PULL BACK TO SHOOT", 15, TEXT)
 	mobile_power_meter = ProgressBar.new()
 	mobile_power_meter.min_value = 0.0
@@ -548,9 +551,10 @@ func _build_mobile_ui() -> void:
 	mobile_power_meter.add_theme_stylebox_override("background", _style(Color("#102522"), Color.TRANSPARENT, 5))
 	mobile_power_meter.add_theme_stylebox_override("fill", _style(MINT, Color.TRANSPARENT, 5))
 	power_stack.add_child(mobile_power_meter)
-	mobile_fire = _make_button(power_row, "PULL BACK", true)
-	mobile_fire.custom_minimum_size = Vector2(145, 66)
-	mobile_fire.size_flags_horizontal = Control.SIZE_SHRINK_END
+	mobile_fire = _make_button(power_column, "PULL BACK", true)
+	mobile_fire.custom_minimum_size = Vector2(155, 74)
+	mobile_fire.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	mobile_fire.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	# The single pull gesture is captured globally, even when the finger
 	# moves beyond this visual pad. The pad itself is display-only.
 	mobile_fire.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -558,55 +562,187 @@ func _build_mobile_ui() -> void:
 	mobile_fire.add_theme_stylebox_override("disabled", _style(Color("#34594e"), EDGE, 9))
 	mobile_fire.add_theme_color_override("font_disabled_color", Color("#dcebe4"))
 
-	mobile_style_back = _mobile_panel()
-	mobile_style_back.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mobile_style_bar = HBoxContainer.new()
-	mobile_style_bar.add_theme_constant_override("separation", 8)
-	mobile_style_bar.visible = false
-	add_child(mobile_style_bar)
-	mobile_style_prev = _make_button(mobile_style_bar, "PREV")
-	mobile_style_prev.custom_minimum_size.x = 61
-	mobile_style_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	mobile_style_prev.pressed.connect(func() -> void: _cycle_board_style(-1))
-	mobile_style_name = _mobile_label(mobile_style_bar, "CLASSIC TOURNAMENT", 11, MINT)
-	mobile_style_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mobile_style_next = _make_button(mobile_style_bar, "NEXT")
-	mobile_style_next.custom_minimum_size.x = 61
-	mobile_style_next.size_flags_horizontal = Control.SIZE_SHRINK_END
-	mobile_style_next.pressed.connect(func() -> void: _cycle_board_style(1))
+	# The menu trigger is the only additional button in the phone header.
+	# Drawn in code so no unsupported font glyphs or texture import are needed.
+	mobile_menu_button = MOBILE_MENU_BUTTON.new()
+	mobile_menu_button.tooltip_text = "Open game menu"
+	mobile_menu_button.visible = false
+	mobile_menu_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	mobile_menu_button.pressed.connect(_mobile_toggle_menu)
+	add_child(mobile_menu_button)
 
-	# Separate difficulty selector: the larger arrow and text need more width
-	# than the old cramped three-column action bar could provide.
-	mobile_difficulty_panel = _mobile_panel()
-	mobile_difficulty_row = HBoxContainer.new()
-	mobile_difficulty_row.add_theme_constant_override("separation", 12)
-	mobile_difficulty_panel.add_child(mobile_difficulty_row)
-	mobile_difficulty_label = _mobile_label(mobile_difficulty_row, "CPU DIFFICULTY", 15, MINT)
-	mobile_difficulty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	mobile_difficulty_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mobile_action_bar = HBoxContainer.new()
-	mobile_action_bar.add_theme_constant_override("separation", 11)
-	mobile_action_bar.visible = false
-	add_child(mobile_action_bar)
-	mobile_cpu_select = OptionButton.new()
-	mobile_cpu_select.add_item("CASUAL", 0)
-	mobile_cpu_select.add_item("STANDARD", 1)
-	mobile_cpu_select.add_item("EXPERT", 2)
-	mobile_cpu_select.select(cpu_skill)
-	mobile_cpu_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_style_cpu_option(mobile_cpu_select, true)
-	mobile_cpu_select.item_selected.connect(func(index: int) -> void:
-		cpu_skill = index
-		cpu_selector.select(index)
+	# An outside tap dismisses the menu. Scrim and sheet intercept all input,
+	# while the existing gesture-owned pull pad stays completely separate.
+	mobile_menu_scrim = ColorRect.new()
+	mobile_menu_scrim.color = Color(0.02, 0.08, 0.07, 0.78)
+	mobile_menu_scrim.mouse_filter = Control.MOUSE_FILTER_STOP
+	mobile_menu_scrim.visible = false
+	mobile_menu_scrim.gui_input.connect(_mobile_menu_outside_input)
+	add_child(mobile_menu_scrim)
+
+	mobile_menu_panel = PanelContainer.new()
+	var menu_skin := _style(Color("#1b3731"), Color("#719889"), 18)
+	menu_skin.content_margin_left = 19.0
+	menu_skin.content_margin_right = 19.0
+	menu_skin.content_margin_top = 20.0
+	menu_skin.content_margin_bottom = 20.0
+	menu_skin.shadow_color = Color(0, 0, 0, 0.38)
+	menu_skin.shadow_size = 20
+	menu_skin.shadow_offset = Vector2(0, 8)
+	mobile_menu_panel.add_theme_stylebox_override("panel", menu_skin)
+	mobile_menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	mobile_menu_panel.visible = false
+	add_child(mobile_menu_panel)
+	var menu_scroll := ScrollContainer.new()
+	menu_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	menu_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	mobile_menu_panel.add_child(menu_scroll)
+	var menu_content := VBoxContainer.new()
+	menu_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	menu_content.add_theme_constant_override("separation", 12)
+	menu_scroll.add_child(menu_content)
+
+	var heading_row := HBoxContainer.new()
+	heading_row.add_theme_constant_override("separation", 10)
+	menu_content.add_child(heading_row)
+	var heading_text := VBoxContainer.new()
+	heading_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading_text.add_theme_constant_override("separation", 2)
+	heading_row.add_child(heading_text)
+	var menu_title := _label(heading_text, "GAME MENU", 23, TEXT)
+	menu_title.name = "MenuTitle"
+	var menu_subtitle := _label(heading_text, "MATCH SETTINGS", 11, MINT)
+	menu_subtitle.name = "MenuSubtitle"
+	var close := _make_button(heading_row, "CLOSE")
+	close.name = "MenuClose"
+	close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	close.custom_minimum_size = Vector2(81, 43)
+	close.pressed.connect(_mobile_close_menu)
+
+	var divider := HSeparator.new()
+	divider.add_theme_color_override("color", EDGE_SOFT)
+	menu_content.add_child(divider)
+
+	var design_heading := _label(menu_content, "BOARD DESIGN", 12, MINT)
+	design_heading.name = "MenuDesignTitle"
+	var design_panel := PanelContainer.new()
+	var design_skin := _style(Color("#24463e"), EDGE_SOFT, 12)
+	design_skin.content_margin_left = 7.0
+	design_skin.content_margin_right = 7.0
+	design_skin.content_margin_top = 7.0
+	design_skin.content_margin_bottom = 7.0
+	design_panel.add_theme_stylebox_override("panel", design_skin)
+	menu_content.add_child(design_panel)
+	var design_row := HBoxContainer.new()
+	design_row.add_theme_constant_override("separation", 6)
+	design_panel.add_child(design_row)
+	mobile_menu_prev = _make_button(design_row, "PREV")
+	mobile_menu_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	mobile_menu_prev.custom_minimum_size = Vector2(65, 49)
+	mobile_menu_prev.pressed.connect(func() -> void: _cycle_board_style(-1))
+	var style_text := VBoxContainer.new()
+	style_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	style_text.add_theme_constant_override("separation", 2)
+	design_row.add_child(style_text)
+	mobile_menu_style_count = _mobile_label(style_text, "01 / 08", 12, MUTED)
+	mobile_menu_style_name = _mobile_label(style_text, "CLASSIC TOURNAMENT", 15, TEXT)
+	mobile_menu_next_style = _make_button(design_row, "NEXT")
+	mobile_menu_next_style.size_flags_horizontal = Control.SIZE_SHRINK_END
+	mobile_menu_next_style.custom_minimum_size = Vector2(65, 49)
+	mobile_menu_next_style.pressed.connect(func() -> void: _cycle_board_style(1))
+
+	var difficulty_heading := _label(menu_content, "CPU DIFFICULTY", 12, MINT)
+	difficulty_heading.name = "MenuDifficultyTitle"
+	var difficulty_choices := HBoxContainer.new()
+	difficulty_choices.name = "MenuDifficultyChoices"
+	difficulty_choices.add_theme_constant_override("separation", 7)
+	menu_content.add_child(difficulty_choices)
+	for i in range(3):
+		var b := _make_button(difficulty_choices, ["CASUAL", "STANDARD", "EXPERT"][i])
+		b.custom_minimum_size.y = 48
+		b.pressed.connect(_mobile_set_difficulty.bind(i))
+		mobile_menu_difficulties.append(b)
+
+	var actions_divider := HSeparator.new()
+	actions_divider.add_theme_color_override("color", EDGE_SOFT)
+	menu_content.add_child(actions_divider)
+	var actions := HBoxContainer.new()
+	actions.name = "MenuActions"
+	actions.add_theme_constant_override("separation", 9)
+	menu_content.add_child(actions)
+	mobile_menu_rules = _make_button(actions, "RULES")
+	mobile_menu_rules.pressed.connect(_open_rules)
+	mobile_menu_restart = _make_button(actions, "RESTART")
+	mobile_menu_restart.pressed.connect(func() -> void:
+		_mobile_close_menu()
+		_new_match()
 	)
-	mobile_difficulty_row.add_child(mobile_cpu_select)
-	mobile_rules = _make_button(mobile_action_bar, "RULES")
-	mobile_rules.pressed.connect(_open_rules)
-	mobile_restart = _make_button(mobile_action_bar, "RESTART")
-	mobile_restart.pressed.connect(_new_match)
-	mobile_next = _make_button(mobile_action_bar, "NEXT BOARD", true)
-	mobile_next.pressed.connect(_next_board)
-	mobile_next.visible = false
+	mobile_menu_next_board = _make_button(menu_content, "NEXT BOARD", true)
+	mobile_menu_next_board.visible = false
+	mobile_menu_next_board.pressed.connect(func() -> void:
+		_mobile_close_menu()
+		_next_board()
+	)
+	var footnote := _mobile_label(menu_content, "CHANGES APPLY IMMEDIATELY", 11, MUTED)
+	footnote.name = "MenuFootnote"
+	_mobile_refresh_menu()
+
+func _mobile_menu_outside_input(event: InputEvent) -> void:
+	if (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		_mobile_close_menu()
+		get_viewport().set_input_as_handled()
+
+func _mobile_toggle_menu() -> void:
+	if mobile_menu_open:
+		_mobile_close_menu()
+	else:
+		_mobile_open_menu()
+
+func _mobile_open_menu() -> void:
+	if not portrait_touch or mobile_menu_open or rules_overlay.visible:
+		return
+	_cancel_mobile_charge()
+	mobile_board_finger = -1
+	mobile_board_mouse_down = false
+	mobile_menu_open = true
+	_mobile_refresh_menu()
+	mobile_menu_scrim.show()
+	mobile_menu_panel.show()
+	mobile_menu_scrim.move_to_front()
+	mobile_menu_panel.move_to_front()
+	if sound_click != null:
+		sound_click.play()
+
+func _mobile_close_menu() -> void:
+	if not mobile_menu_open:
+		return
+	mobile_menu_open = false
+	mobile_menu_panel.hide()
+	mobile_menu_scrim.hide()
+	if sound_click != null:
+		sound_click.play()
+
+func _mobile_set_difficulty(index: int) -> void:
+	cpu_skill = index
+	cpu_selector.select(index)
+	_mobile_refresh_menu()
+	if sound_click != null:
+		sound_click.play()
+
+func _mobile_refresh_menu() -> void:
+	if mobile_menu_style_name == null:
+		return
+	var names: Array = CarromBoard.DUBOO_STYLE_NAMES if duboo_mode else CarromBoard.STYLE_NAMES
+	var index := duboo_style_index if duboo_mode else board_style_index
+	mobile_menu_style_name.text = str(names[index])
+	mobile_menu_style_count.text = "%02d / %02d" % [index + 1, names.size()]
+	for i in range(mobile_menu_difficulties.size()):
+		_mobile_button_skin(mobile_menu_difficulties[i], i == cpu_skill, mobile_mobile_scale)
+	if mobile_menu_restart != null:
+		mobile_menu_restart.text = "NEW BOARD" if duboo_mode else "RESTART"
+	if mobile_menu_next_board != null:
+		mobile_menu_next_board.visible = phase == "board_over" and not duboo_mode
+
 
 func _mobile_sync() -> void:
 	if mobile_score_panel == null:
@@ -630,18 +766,15 @@ func _mobile_sync() -> void:
 		mobile_status_hint.text = "WAIT FOR PIECES TO STOP"
 	elif phase in ["cpu_aim", "cpu_think"]:
 		mobile_status_hint.text = "OPPONENT PLAYING"
+	elif phase == "board_over":
+		mobile_status_hint.text = "OPEN MENU TO CONTINUE"
 	else:
-		mobile_status_hint.text = "CONTINUE USING BUTTONS BELOW"
+		mobile_status_hint.text = "MATCH IN PROGRESS"
 	mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0)) if phase == "charging" else "PULL BACK TO SHOOT"
 	mobile_power_meter.value = charge_power * 100.0 if phase == "charging" else 0.0
 	mobile_fire.disabled = phase not in ["aim", "charging"] or player_turn != 0 or rules_overlay.visible
-	mobile_next.visible = phase == "board_over"
-	mobile_restart.visible = phase != "board_over"
-	mobile_restart.text = "NEW GAME" if duboo_mode else "RESTART"
-	mobile_style_name.text = CarromBoard.DUBOO_STYLE_NAMES[duboo_style_index] if duboo_mode else CarromBoard.STYLE_NAMES[board_style_index]
 	mobile_match_label.text = "DUBOO / ONE BOARD" if duboo_mode else "BOARD %d / 8" % board_number
-	if mobile_cpu_select.selected != cpu_skill:
-		mobile_cpu_select.select(cpu_skill)
+	_mobile_refresh_menu()
 
 func _mobile_fire_visual(held: bool) -> void:
 	if mobile_fire == null:
@@ -790,6 +923,7 @@ func _layout() -> void:
 	var sz := size
 	var should_portrait := sz.y > sz.x * 1.06
 	if should_portrait != portrait_touch:
+		_mobile_close_menu()
 		_cancel_mobile_charge()
 		mobile_board_finger = -1
 		mobile_board_mouse_down = false
@@ -797,13 +931,14 @@ func _layout() -> void:
 	if portrait_touch:
 		_layout_portrait(sz)
 		return
-	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_back, mobile_style_bar, mobile_difficulty_panel, mobile_action_bar, mobile_match_label]:
+	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_match_label, mobile_menu_button]:
 		mobile_node.visible = false
+	mobile_menu_scrim.hide()
+	mobile_menu_panel.hide()
 	mode_bar.add_theme_constant_override("separation", 8)
 	classic_button.add_theme_font_size_override("font_size", 15)
 	duboo_button.add_theme_font_size_override("font_size", 15)
 	_style_cpu_option(cpu_selector, false)
-	_style_cpu_option(mobile_cpu_select, true)
 	side_panel.visible = true
 	board_caption.visible = true
 	tip_label.visible = true
@@ -840,127 +975,122 @@ func _layout() -> void:
 	rules_overlay.size = dialog_size
 
 func _layout_portrait(sz: Vector2) -> void:
-	# Portrait has a dedicated vertical composition. It fills tall screens by
-	# distributing surplus height among gaps and controls instead of leaving a
-	# blank region below an otherwise compact interface.
+	# The board and score are always visible; ALL secondary controls live in
+	# the hamburger menu. Only the power display and pull pad sit below the board.
 	side_panel.visible = false
 	board_caption.visible = false
 	tip_label.visible = false
-	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_back, mobile_style_bar, mobile_difficulty_panel, mobile_action_bar, mobile_match_label]:
-		mobile_node.visible = true
+	for node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_match_label, mobile_menu_button]:
+		node.show()
 
-	# Width sets the UI density; tall phone displays use extra height as spacing.
 	var u := clampf(sz.x / 430.0, 0.72, 2.5)
 	mobile_mobile_scale = u
-	var gutter := 9.0 * u
-	var safe_top := 28.0 * u
-	var safe_bottom := 14.0 * u
-	var title_h := 32.0 * u
-	var title_gap := 10.0 * u
+	var gutter := 12.0 * u
+	var safe_top := 25.0 * u
+	var safe_bottom := 18.0 * u
+	var header_h := 48.0 * u
 	var mode_h := 47.0 * u
-	var scores_h := 61.0 * u
-	var status_h := 52.0 * u
-	var power_h := 66.0 * u
-	var theme_h := 49.0 * u
-	var difficulty_h := 52.0 * u
-	var actions_h := 53.0 * u
-	var gap := 5.5 * u
-	var preferred_board_width := sz.x - 2.0 * gutter
-	var fixed_h := safe_top + title_h + title_gap + mode_h + scores_h + status_h + power_h + theme_h + difficulty_h + actions_h + safe_bottom + 7.0 * gap
-	var board_width := minf(preferred_board_width, maxf(220.0 * u, sz.y - fixed_h))
-	# Portrait devices shorter than 9:16 may need some compression; the usual
-	# Galaxy S22 proportions preserve an almost edge-to-edge wooden frame.
+	var scores_h := 67.0 * u
+	var status_h := 61.0 * u
+	# Enough vertical room for a stacked meter and the original-size shot pad.
+	var power_h := 142.0 * u
+	var gap := 10.0 * u
+	var max_board_width := sz.x - gutter * 2.0
+	var fixed_h := safe_top + header_h + mode_h + scores_h + status_h + power_h + safe_bottom + 4.0 * gap
+	# Short portrait devices can still fit a legible board; taller ones keep
+	# the board edge-to-edge and distribute the remaining vertical breathing room.
+	var board_width := minf(max_board_width, maxf(210.0 * u, sz.y - fixed_h))
 	var spare := maxf(0.0, sz.y - fixed_h - board_width)
-	var big_gap := gap + spare * 0.1
-	status_h += spare * 0.08
-	power_h += spare * 0.08
-	difficulty_h += spare * 0.06
-	actions_h += spare * 0.08
-	var y := safe_top
+	var rhythm := gap + minf(spare / 4.0, 27.0 * u)
+	var leftover := maxf(0.0, spare - (rhythm - gap) * 4.0)
+	# The pull pad keeps its familiar footprint; distribute surplus space as
+	# breathing room rather than enlarging the button or its touch hitbox.
+	var dock_extra := minf(leftover * 0.38, 30.0 * u)
+	power_h += dock_extra
+	var extra_top := maxf(0.0, leftover - dock_extra) * 0.40
+	var y := safe_top + extra_top
 
-	# Branding never intersects the camera cutout / top rounded corners.
+	# Compact game identity / match indicator / 48px hamburger trigger.
 	title_label.position = Vector2(gutter + 2.0 * u, y)
-	title_label.size = Vector2(sz.x * 0.48, title_h)
-	title_label.add_theme_font_size_override("font_size", maxi(22, int(round(29.0 * u))))
-	mobile_match_label.position = Vector2(sz.x * 0.54, y)
-	mobile_match_label.size = Vector2(sz.x * 0.46 - gutter, title_h)
-	mobile_match_label.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
-	y += title_h + title_gap
+	title_label.size = Vector2(sz.x * 0.42, header_h)
+	title_label.add_theme_font_size_override("font_size", maxi(21, int(round(28.0 * u))))
+	mobile_menu_button.position = Vector2(sz.x - gutter - header_h, y)
+	mobile_menu_button.size = Vector2(header_h, header_h)
+	_mobile_button_skin(mobile_menu_button, false, u)
+	mobile_match_label.position = Vector2(sz.x * 0.45, y)
+	mobile_match_label.size = Vector2(sz.x * 0.55 - gutter - header_h - 5.0 * u, header_h)
+	mobile_match_label.add_theme_font_size_override("font_size", maxi(12, int(round(14.5 * u))))
+	y += header_h + rhythm
 
 	mode_bar.position = Vector2(gutter, y)
 	mode_bar.size = Vector2(sz.x - gutter * 2.0, mode_h)
 	mode_bar.add_theme_constant_override("separation", maxi(8, int(round(9.0 * u))))
 	classic_button.custom_minimum_size.y = mode_h
 	duboo_button.custom_minimum_size.y = mode_h
-	classic_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
-	duboo_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
+	classic_button.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
+	duboo_button.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
 	_mobile_button_skin(classic_button, not duboo_mode, u)
 	_mobile_button_skin(duboo_button, duboo_mode, u)
-	y += mode_h + big_gap
+	y += mode_h + rhythm
 
 	mobile_score_panel.position = Vector2(gutter, y)
 	mobile_score_panel.size = Vector2(sz.x - gutter * 2.0, scores_h)
 	for heading in mobile_score_headings:
-		heading.add_theme_font_size_override("font_size", maxi(13, int(round(14.5 * u))))
-	mobile_you.add_theme_font_size_override("font_size", maxi(19, int(round(22.0 * u))))
-	mobile_cpu.add_theme_font_size_override("font_size", maxi(19, int(round(22.0 * u))))
-	mobile_queen.add_theme_font_size_override("font_size", maxi(14, int(round(17.0 * u))))
-	y += scores_h + big_gap
+		heading.add_theme_font_size_override("font_size", maxi(12, int(round(14.5 * u))))
+	mobile_you.add_theme_font_size_override("font_size", maxi(18, int(round(22.0 * u))))
+	mobile_cpu.add_theme_font_size_override("font_size", maxi(18, int(round(22.0 * u))))
+	mobile_queen.add_theme_font_size_override("font_size", maxi(12, int(round(16.0 * u))))
+	y += scores_h + 6.0 * u
 
-	# Board dimensions follow the width first, never a desktop-style sidebar.
+	# Game status belongs ABOVE the table, not among the bottom controls.
+	mobile_status_panel.position = Vector2(gutter, y)
+	mobile_status_panel.size = Vector2(sz.x - gutter * 2.0, status_h)
+	mobile_status_title.add_theme_font_size_override("font_size", maxi(15, int(round(18.0 * u))))
+	mobile_status_hint.add_theme_font_size_override("font_size", maxi(11, int(round(13.8 * u))))
+	y += status_h + 7.0 * u
+
 	var scale_value := board_width / 766.0
 	var board_left := (sz.x - board_width) * 0.5
 	board.scale = Vector2.ONE * scale_value
 	board.position = Vector2(board_left + 43.0 * scale_value, y + 43.0 * scale_value)
-	y += board_width + big_gap
+	y += board_width + rhythm
 
-	mobile_status_panel.position = Vector2(gutter, y)
-	mobile_status_panel.size = Vector2(sz.x - gutter * 2.0, status_h)
-	mobile_status_title.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
-	mobile_status_hint.add_theme_font_size_override("font_size", maxi(13, int(round(15.0 * u))))
-	y += status_h + big_gap
-
+	# One quiet control dock. No rules, difficulty, theme, or restart buttons.
 	mobile_power_panel.position = Vector2(gutter, y)
 	mobile_power_panel.size = Vector2(sz.x - gutter * 2.0, power_h)
-	mobile_power_label.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
+	# Scale the internal gaps along with the portrait layout so even narrow
+	# phones fit the bar above the touch target without clipping either.
+	var power_skin := mobile_power_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	power_skin.content_margin_left = 16.0 * u
+	power_skin.content_margin_right = 16.0 * u
+	power_skin.content_margin_top = 7.0 * u
+	power_skin.content_margin_bottom = 7.0 * u
+	mobile_power_panel.add_theme_stylebox_override("panel", power_skin)
+	var power_column := mobile_power_panel.get_child(0) as VBoxContainer
+	power_column.add_theme_constant_override("separation", maxi(4, int(round(7.0 * u))))
+	var power_stack := power_column.get_child(0) as VBoxContainer
+	power_stack.add_theme_constant_override("separation", maxi(3, int(round(6.0 * u))))
+	mobile_power_label.add_theme_font_size_override("font_size", maxi(15, int(round(18.0 * u))))
 	mobile_power_meter.custom_minimum_size.y = 13.0 * u
-	# Respect the panel's own padding; the pull pad remains fully visible.
-	mobile_fire.custom_minimum_size = Vector2(157.0 * u, power_h - 17.0 * u)
-	mobile_fire.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
+	mobile_fire.custom_minimum_size = Vector2(155.0 * u, 74.0 * u)
+	mobile_fire.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
 	_mobile_fire_visual(phase == "charging")
-	y += power_h + big_gap
 
-	mobile_style_back.position = Vector2(gutter, y)
-	mobile_style_back.size = Vector2(sz.x - gutter * 2.0, theme_h)
-	mobile_style_bar.position = Vector2(gutter + 4.0 * u, y + 3.0 * u)
-	mobile_style_bar.size = Vector2(sz.x - gutter * 2.0 - 8.0 * u, theme_h - 6.0 * u)
-	mobile_style_prev.custom_minimum_size = Vector2(67.0 * u, theme_h - 6.0 * u)
-	mobile_style_next.custom_minimum_size = Vector2(67.0 * u, theme_h - 6.0 * u)
-	mobile_style_prev.add_theme_font_size_override("font_size", maxi(15, int(round(16.5 * u))))
-	mobile_style_next.add_theme_font_size_override("font_size", maxi(15, int(round(16.5 * u))))
-	mobile_style_name.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
-	_mobile_button_skin(mobile_style_prev, false, u)
-	_mobile_button_skin(mobile_style_next, false, u)
-	y += theme_h + big_gap
+	# Modal occupies the upper screen with its own internally scrolling body.
+	mobile_menu_scrim.position = Vector2.ZERO
+	mobile_menu_scrim.size = sz
+	var menu_w := sz.x - 2.0 * gutter
+	var menu_h := minf(398.0 * u, sz.y - safe_top - safe_bottom - 12.0 * u)
+	mobile_menu_panel.position = Vector2(gutter, safe_top + header_h + 12.0 * u)
+	mobile_menu_panel.size = Vector2(menu_w, minf(menu_h, sz.y - mobile_menu_panel.position.y - safe_bottom))
+	var menu_skin := mobile_menu_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	menu_skin.content_margin_left = 17.0 * u
+	menu_skin.content_margin_right = 17.0 * u
+	menu_skin.content_margin_top = 17.0 * u
+	menu_skin.content_margin_bottom = 17.0 * u
+	mobile_menu_panel.add_theme_stylebox_override("panel", menu_skin)
+	_mobile_menu_layout(u)
 
-	# Dedicated difficulty bar: a real, large arrow and a wide tap target.
-	mobile_difficulty_panel.position = Vector2(gutter, y)
-	mobile_difficulty_panel.size = Vector2(sz.x - gutter * 2.0, difficulty_h)
-	mobile_difficulty_row.add_theme_constant_override("separation", maxi(8, int(round(11.0 * u))))
-	mobile_difficulty_label.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
-	mobile_cpu_select.custom_minimum_size = Vector2(181.0 * u, difficulty_h - 14.0 * u)
-	_style_cpu_option(mobile_cpu_select, true, u, int(round(181.0 * u)))
-	y += difficulty_h + big_gap
-
-	mobile_action_bar.position = Vector2(gutter, y)
-	mobile_action_bar.size = Vector2(sz.x - gutter * 2.0, actions_h)
-	mobile_action_bar.add_theme_constant_override("separation", maxi(8, int(round(10.0 * u))))
-	for b in [mobile_rules, mobile_restart, mobile_next]:
-		b.custom_minimum_size.y = actions_h
-		b.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
-		_mobile_button_skin(b, b == mobile_next, u)
-
-	# A readable, safely inset modal with fixed dismissal controls.
 	var dialog_size := Vector2(sz.x - gutter * 2.0, minf(sz.y - safe_top - safe_bottom, 740.0 * u))
 	rules_overlay.position = Vector2((sz.x - dialog_size.x) * 0.5, safe_top)
 	rules_overlay.size = dialog_size
@@ -974,6 +1104,49 @@ func _layout_portrait(sz: Vector2) -> void:
 	if rules_body != null and not rules_body.text.contains("PORTRAIT TOUCH CONTROLS"):
 		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nMove the striker by dragging on the lower baseline. Then touch PULL BACK below the board, drag backward to set both direction and power, and lift your finger to shoot. A short drag cancels. There is no timed charging or automatic firing."
 	_mobile_sync()
+
+func _mobile_menu_layout(u: float) -> void:
+	# Independently scaled typography and tap targets; avoids narrow popups.
+	var scroll := mobile_menu_panel.get_child(0) as ScrollContainer
+	var content := scroll.get_child(0) as VBoxContainer
+	content.add_theme_constant_override("separation", maxi(8, int(round(11.0 * u))))
+	for node in content.get_children():
+		if node is Label:
+			var label := node as Label
+			label.add_theme_font_size_override("font_size", maxi(12, int(round(12.0 * u))))
+	var header := content.get_child(0) as HBoxContainer
+	var heading_stack := header.get_child(0) as VBoxContainer
+	var header_title := heading_stack.get_child(0) as Label
+	var header_subtitle := heading_stack.get_child(1) as Label
+	header_title.add_theme_font_size_override("font_size", maxi(21, int(round(23.0 * u))))
+	header_subtitle.add_theme_font_size_override("font_size", maxi(11, int(round(12.0 * u))))
+	var close := header.get_child(1) as Button
+	close.custom_minimum_size = Vector2(81.0 * u, 42.0 * u)
+	close.add_theme_font_size_override("font_size", maxi(13, int(round(14.0 * u))))
+	_mobile_button_skin(close, false, u)
+	var design_panel := content.get_child(3) as PanelContainer
+	var row := design_panel.get_child(0) as HBoxContainer
+	for b in [mobile_menu_prev, mobile_menu_next_style]:
+		b.custom_minimum_size = Vector2(64.0 * u, 50.0 * u)
+		b.add_theme_font_size_override("font_size", maxi(12, int(round(13.5 * u))))
+		_mobile_button_skin(b, false, u)
+	mobile_menu_style_count.add_theme_font_size_override("font_size", maxi(12, int(round(13.0 * u))))
+	mobile_menu_style_name.add_theme_font_size_override("font_size", maxi(12, int(round(15.0 * u))))
+	row.add_theme_constant_override("separation", maxi(4, int(round(6.0 * u))))
+	var difficulty_row := content.get_node("MenuDifficultyChoices") as HBoxContainer
+	difficulty_row.add_theme_constant_override("separation", maxi(5, int(round(7.0 * u))))
+	for b in mobile_menu_difficulties:
+		b.custom_minimum_size.y = 48.0 * u
+		b.add_theme_font_size_override("font_size", maxi(12, int(round(13.5 * u))))
+	var actions := content.get_node("MenuActions") as HBoxContainer
+	actions.add_theme_constant_override("separation", maxi(7, int(round(9.0 * u))))
+	for b in [mobile_menu_rules, mobile_menu_restart, mobile_menu_next_board]:
+		b.custom_minimum_size.y = 49.0 * u
+		b.add_theme_font_size_override("font_size", maxi(13, int(round(15.0 * u))))
+		_mobile_button_skin(b, b == mobile_menu_next_board, u)
+	var footer := content.get_node("MenuFootnote") as Label
+	footer.add_theme_font_size_override("font_size", maxi(10, int(round(11.0 * u))))
+	_mobile_refresh_menu()
 
 func _load_board_style() -> void:
 	var config := ConfigFile.new()
@@ -1012,6 +1185,7 @@ func _cycle_board_style(step: int) -> void:
 		board.set_style(board_style_index)
 	_refresh_board_style_ui()
 	_mobile_sync()
+	_mobile_refresh_menu()
 	_save_board_style()
 	if sound_click != null:
 		sound_click.play()
@@ -1330,6 +1504,11 @@ func _input(event: InputEvent) -> void:
 	if rules_overlay != null and rules_overlay.visible:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_close_rules()
+			get_viewport().set_input_as_handled()
+		return
+	if mobile_menu_open:
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_mobile_close_menu()
 			get_viewport().set_input_as_handled()
 		return
 	if not portrait_touch:
@@ -1664,6 +1843,7 @@ func _next_board() -> void:
 	sound_click.play()
 
 func _open_rules() -> void:
+	_mobile_close_menu()
 	_cancel_mobile_charge()
 	rules_overlay.show()
 	rules_overlay.move_to_front()
