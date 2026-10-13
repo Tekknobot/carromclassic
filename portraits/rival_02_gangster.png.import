@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://0f5sksiyki1q"
-path="res://.godot/imported/ChatGPT Image Oct 14, 2026, 01_42_14 AM-4.png-16171374b70ffb09b6d93273dcf132c3.ctex"
+uid="uid://dkll7v4jw4rvw"
+path="res://.godot/imported/rival_02_gangster.png-e2d6fd54c4e2a48eec939d4fb572a1ca.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://portraits/ChatGPT Image Oct 14, 2026, 01_42_14 AM-4.png"
-dest_files=["res://.godot/imported/ChatGPT Image Oct 14, 2026, 01_42_14 AM-4.png-16171374b70ffb09b6d93273dcf132c3.ctex"]
+source_file="res://portraits/rival_02_gangster.png"
+dest_files=["res://.godot/imported/rival_02_gangster.png-e2d6fd54c4e2a48eec939d4fb572a1ca.ctex"]
 
 [params]
 

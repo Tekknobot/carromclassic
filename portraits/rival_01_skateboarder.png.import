@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dqhhgacsgp7pd"
-path="res://.godot/imported/ChatGPT Image Oct 14, 2026, 01_42_11 AM-2.png-441ced9621df670bf22303dabd85dd67.ctex"
+uid="uid://bqp7l0ojrxia5"
+path="res://.godot/imported/rival_01_skateboarder.png-7e7a1ec3295cdd6a50a6aa7aed970809.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://portraits/ChatGPT Image Oct 14, 2026, 01_42_11 AM-2.png"
-dest_files=["res://.godot/imported/ChatGPT Image Oct 14, 2026, 01_42_11 AM-2.png-441ced9621df670bf22303dabd85dd67.ctex"]
+source_file="res://portraits/rival_01_skateboarder.png"
+dest_files=["res://.godot/imported/rival_01_skateboarder.png-7e7a1ec3295cdd6a50a6aa7aed970809.ctex"]
 
 [params]
 

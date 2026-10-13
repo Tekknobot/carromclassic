@@ -28,6 +28,49 @@ const DUBOO_MIN_SHOT_SPEED := 250.0
 const DUBOO_MAX_SHOT_SPEED := 1080.0
 # Desktop stats dock width is independent of labels, scores, and window changes.
 const DESKTOP_STATS_WIDTH := 244.0
+# The opponent's portrait and biography live in a drawer INSIDE the left dock.
+# Only a slim handle remains at the bottom of the stats panel when closed.
+const RIVAL_DRAWER_HANDLE_HEIGHT := 42.0
+
+# Roster order matches the eight PNG portraits supplied with the project.
+# Shot preferences are small bonuses applied AFTER real collision prediction.
+# Each rival keeps Casual / Standard / Expert precision and planning budgets.
+const RIVALS := [
+	{"name": "DIEGO SOLIS", "alias": "KICKFLIP", "type": "THE SKATEBOARDER",
+	 "bio": "A backstreet skater who sees angles where others see walls. Loves bold rebounds and quick recoveries.",
+	 "bias": {"bank": 23.0, "combo": 11.0, "touch": -6.0, "safety": -11.0}, "quota": [-3, 2, 1, 0], "position": 0.75, "multi": 1.05},
+	{"name": "VIKTOR MARKOVIC", "alias": "VELVET KNUCKLES", "type": "THE GANGSTER",
+	 "bio": "Never shows his hand. Favors safe finishes, controlled power, and leaving you with the harder shot.",
+	 "bias": {"touch": 17.0, "direct": 9.0, "safety": 15.0, "bank": -9.0}, "quota": [1, -1, -1, 1], "position": 1.55, "multi": 0.9},
+	{"name": "AIKO SATO", "alias": "FEEDBACK", "type": "THE ROCKER",
+	 "bio": "Plays every round like a live set. Thrives on lively breaks, chain reactions, and loud combinations.",
+	 "bias": {"combo": 23.0, "clear": 10.0, "direct": 5.0, "safety": -9.0}, "quota": [-2, 0, 3, -1], "position": 0.65, "multi": 1.5},
+	{"name": "ROWAN VALE", "alias": "STATIC", "type": "THE PUNK",
+	 "bio": "Hates the obvious route. Will try a wild cushion line when a safer shot is staring them in the face.",
+	 "bias": {"bank": 28.0, "combo": 18.0, "clear": 12.0, "direct": -9.0}, "quota": [-3, 3, 1, -1], "position": 0.6, "multi": 1.1},
+	{"name": "NIA OKAFOR", "alias": "SPRINT", "type": "THE ATHLETE",
+	 "bio": "Disciplined and relentless. Favors clean lanes, repeatable precision, and fast, decisive finishes.",
+	 "bias": {"direct": 21.0, "touch": 17.0, "combo": -4.0, "safety": -9.0}, "quota": [3, -1, -1, -1], "position": 1.05, "multi": 1.0},
+	{"name": "LEILA RAHMAN", "alias": "VELOUR", "type": "THE MODEL",
+	 "bio": "Unhurried and immaculate. Prefers a delicate touch and tidy board control over risky theatrics.",
+	 "bias": {"touch": 26.0, "direct": 11.0, "safety": 8.0, "bank": -10.0}, "quota": [2, -1, -1, 0], "position": 1.3, "multi": 0.85},
+	{"name": "MALIK BAPTISTE", "alias": "VERSE", "type": "THE RAPPER",
+	 "bio": "Finds rhythm in every collision. Builds momentum through combinations and is always chasing the double.",
+	 "bias": {"combo": 27.0, "bank": 11.0, "direct": 2.0, "safety": -8.0}, "quota": [-2, 0, 3, -1], "position": 0.8, "multi": 1.65},
+	{"name": "HANA PARK", "alias": "GHOSTWIRE", "type": "THE HACKER",
+	 "bio": "Reads the board like a system. Values quiet positioning, blocked lanes, and the precise shot nobody expected.",
+	 "bias": {"safety": 24.0, "clear": 12.0, "touch": 12.0, "bank": 5.0}, "quota": [-2, 0, 0, 2], "position": 1.85, "multi": 1.0}
+]
+const RIVAL_PORTRAITS := [
+	preload("res://portraits/rival_01_skateboarder.png"),
+	preload("res://portraits/rival_02_gangster.png"),
+	preload("res://portraits/rival_03_rocker.png"),
+	preload("res://portraits/rival_04_punk.png"),
+	preload("res://portraits/rival_05_athlete.png"),
+	preload("res://portraits/rival_06_model.png"),
+	preload("res://portraits/rival_07_rapper.png"),
+	preload("res://portraits/rival_08_hacker.png")
+]
 
 var duboo_mode := false
 var mode_bar: HBoxContainer
@@ -56,6 +99,27 @@ var aim_direction := Vector2.UP
 var cpu_time := 0.0
 var cpu_queued_shot: Dictionary = {}
 var cpu_skill := 1
+var rival_index := 0
+var rival_results: Dictionary = {}  # classic_0 -> [player wins, CPU wins, draws]
+var rival_match_recorded := false
+var rival_portrait: TextureRect
+var rival_name: Label
+var rival_alias: Label
+var rival_type: Label
+var rival_bio: Label
+var rival_record: Label
+var rival_prev_button: Button
+var rival_next_button: Button
+var rival_drawer: Panel
+var rival_drawer_handle: Button
+var rival_drawer_scroll: ScrollContainer
+var rival_drawer_chevron: Line2D
+var rival_drawer_open := false
+var rival_drawer_tween: Tween
+var mobile_rival_name: Label
+var mobile_rival_bio: Label
+var mobile_rival_prev: Button
+var mobile_rival_next: Button
 # Per-turn incremental physics search. Each difficulty gets its own budget.
 var cpu_plan_candidates: Array[Dictionary] = []
 var cpu_plan_ranked: Array[Dictionary] = []
@@ -382,7 +446,8 @@ func _sidebar_panel() -> VBoxContainer:
 	margin.add_theme_constant_override("margin_left", 22)
 	margin.add_theme_constant_override("margin_right", 22)
 	margin.add_theme_constant_override("margin_top", 22)
-	margin.add_theme_constant_override("margin_bottom", 22)
+	# Leave the bottom drawer tab clear of scrolling match information.
+	margin.add_theme_constant_override("margin_bottom", 58 if stats_panel == null else 22)
 	var scroll := ScrollContainer.new()
 	# Keep any unexpectedly long strings inside the clipped dock rather than
 	# allowing the ScrollContainer's child minimum width to alter its parent.
@@ -496,6 +561,9 @@ func _build_ui() -> void:
 	next_button = _make_button(stats, "NEXT BOARD", true)
 	next_button.pressed.connect(_next_board)
 	next_button.visible = false
+	# The opponent profile is independent of the scrolling stats content.
+	# Its collapsed handle stays visible; opening it never changes dock width.
+	_build_rival_drawer()
 
 	# RIGHT: Identity, game mode and all adjustable information/actions.
 	var info := _sidebar_panel()
@@ -555,6 +623,246 @@ func _build_ui() -> void:
 	restart_button = _make_button(bottom_buttons, "NEW MATCH")
 	restart_button.pressed.connect(_new_match)
 	_build_rules_overlay()
+
+func _build_rival_drawer() -> void:
+	# This is a *child* of stats_panel, not a sibling in the board layout.
+	# It slides vertically within exactly the existing 244px dock bounds.
+	rival_drawer = Panel.new()
+	rival_drawer.name = "RivalDrawer"
+	rival_drawer.clip_contents = true
+	rival_drawer.mouse_filter = Control.MOUSE_FILTER_STOP
+	var drawer_skin := _style(Color("#1b3731"), EDGE, 12)
+	drawer_skin.content_margin_left = 0.0
+	drawer_skin.content_margin_right = 0.0
+	drawer_skin.content_margin_top = 0.0
+	drawer_skin.content_margin_bottom = 0.0
+	rival_drawer.add_theme_stylebox_override("panel", drawer_skin)
+	stats_panel.add_child(rival_drawer)
+
+	rival_drawer_handle = Button.new()
+	rival_drawer_handle.name = "RivalDrawerHandle"
+	rival_drawer_handle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	rival_drawer_handle.clip_text = true
+	rival_drawer_handle.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	rival_drawer_handle.focus_mode = Control.FOCUS_NONE
+	rival_drawer_handle.add_theme_font_size_override("font_size", 11)
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var fill := Color("#295047") if state == "hover" else Color("#26483f")
+		var edge := MINT if state == "hover" else EDGE
+		var head_style := _style(fill, edge, 8)
+		head_style.content_margin_left = 12.0
+		head_style.content_margin_right = 36.0
+		head_style.content_margin_top = 3.0
+		head_style.content_margin_bottom = 3.0
+		rival_drawer_handle.add_theme_stylebox_override(state, head_style)
+	rival_drawer_handle.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	rival_drawer_handle.add_theme_color_override("font_color", MINT)
+	rival_drawer_handle.add_theme_color_override("font_hover_color", TEXT)
+	rival_drawer_handle.add_theme_color_override("font_pressed_color", TEXT)
+	rival_drawer_handle.pressed.connect(_toggle_rival_drawer)
+	rival_drawer.add_child(rival_drawer_handle)
+
+	# Draw the chevron ourselves: no dependency on special font characters.
+	rival_drawer_chevron = Line2D.new()
+	rival_drawer_chevron.points = PackedVector2Array([
+		Vector2(-10.0, 4.0), Vector2(0.0, -4.0), Vector2(10.0, 4.0)
+	])
+	rival_drawer_chevron.width = 2.4
+	rival_drawer_chevron.default_color = MINT
+	rival_drawer_chevron.antialiased = true
+	rival_drawer_handle.add_child(rival_drawer_chevron)
+
+	rival_drawer_scroll = ScrollContainer.new()
+	rival_drawer_scroll.name = "RivalDrawerContent"
+	rival_drawer_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	rival_drawer_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	rival_drawer_scroll.clip_contents = true
+	rival_drawer.add_child(rival_drawer_scroll)
+	var content := VBoxContainer.new()
+	content.name = "RivalProfile"
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 8)
+	rival_drawer_scroll.add_child(content)
+	_build_rival_card(content)
+	_refresh_rival_drawer_handle()
+
+func _refresh_rival_drawer_handle() -> void:
+	if rival_drawer_handle == null:
+		return
+	if rival_drawer_open:
+		rival_drawer_handle.text = "BACK TO MATCH"
+	else:
+		rival_drawer_handle.text = "RIVAL  /  " + str(RIVALS[rival_index]["alias"])
+	if rival_drawer_chevron != null:
+		rival_drawer_chevron.rotation = PI if rival_drawer_open else 0.0
+
+func _layout_rival_drawer() -> void:
+	if rival_drawer == null or stats_panel == null:
+		return
+	# Resizing is authoritative: no old tween can leave the drawer partly out.
+	if rival_drawer_tween != null and rival_drawer_tween.is_running():
+		rival_drawer_tween.kill()
+	var width := stats_panel.size.x
+	var height := stats_panel.size.y
+	rival_drawer.size = Vector2(width, height)
+	rival_drawer.position = Vector2(0.0, 0.0 if rival_drawer_open else maxf(0.0, height - RIVAL_DRAWER_HANDLE_HEIGHT))
+	rival_drawer_handle.position = Vector2(7.0, 4.0)
+	rival_drawer_handle.size = Vector2(maxf(0.0, width - 14.0), RIVAL_DRAWER_HANDLE_HEIGHT - 8.0)
+	rival_drawer_chevron.position = Vector2(rival_drawer_handle.size.x - 23.0, rival_drawer_handle.size.y * 0.5)
+	rival_drawer_scroll.position = Vector2(12.0, RIVAL_DRAWER_HANDLE_HEIGHT + 6.0)
+	rival_drawer_scroll.size = Vector2(maxf(0.0, width - 24.0), maxf(0.0, height - RIVAL_DRAWER_HANDLE_HEIGHT - 20.0))
+
+func _toggle_rival_drawer() -> void:
+	if portrait_touch or rival_drawer == null:
+		return
+	rival_drawer_open = not rival_drawer_open
+	if rival_drawer_tween != null and rival_drawer_tween.is_running():
+		rival_drawer_tween.kill()
+	var target_y := 0.0 if rival_drawer_open else maxf(0.0, stats_panel.size.y - RIVAL_DRAWER_HANDLE_HEIGHT)
+	rival_drawer_tween = create_tween()
+	rival_drawer_tween.set_trans(Tween.TRANS_CUBIC)
+	rival_drawer_tween.set_ease(Tween.EASE_OUT)
+	rival_drawer_tween.tween_property(rival_drawer, "position:y", target_y, 0.27)
+	_refresh_rival_drawer_handle()
+	if rival_drawer_open:
+		rival_drawer_scroll.scroll_vertical = 0
+	if sound_click != null:
+		sound_click.play()
+
+func _build_rival_card(parent: VBoxContainer) -> void:
+	# Fixed-width opponent card with vertically stacked identity.
+	_label(parent, "CLUB OPPONENT", 11, MINT)
+
+	var card := PanelContainer.new()
+	var skin := _style(PANEL_ALT, EDGE_SOFT, 10)
+	skin.content_margin_left = 8.0
+	skin.content_margin_right = 8.0
+	skin.content_margin_top = 9.0
+	skin.content_margin_bottom = 9.0
+	card.add_theme_stylebox_override("panel", skin)
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(card)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_child(column)
+
+	# Portrait - full card width, above all identity text.
+	rival_portrait = TextureRect.new()
+	rival_portrait.custom_minimum_size = Vector2(0.0, 180.0)
+	rival_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rival_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	rival_portrait.clip_contents = true
+	rival_portrait.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(rival_portrait)
+
+	# Identity - stacked vertically below portrait.
+	var text_column := VBoxContainer.new()
+	text_column.add_theme_constant_override("separation", 2)
+	text_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(text_column)
+
+	rival_type = _label(
+		text_column, "THE SKATEBOARDER", 10, MUTED, true
+	)
+
+	rival_name = _label(
+		text_column, "DIEGO SOLIS", 13, TEXT, true
+	)
+
+	rival_alias = _label(
+		text_column, "KICKFLIP", 11, GOLD, true
+	)
+
+	# Biography.
+	rival_bio = _label(column, "", 11, MUTED, true)
+
+	# Head-to-head record.
+	rival_record = _label(column, "", 10, MINT, true)
+
+	# Opponent navigation.
+	var nav := HBoxContainer.new()
+	nav.add_theme_constant_override("separation", 6)
+	column.add_child(nav)
+
+	rival_prev_button = _make_button(nav, "PREV")
+	rival_next_button = _make_button(nav, "NEXT")
+
+	for button in [rival_prev_button, rival_next_button]:
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size.y = 29.0
+		button.add_theme_font_size_override("font_size", 11)
+
+		for state in ["normal", "hover", "pressed", "disabled"]:
+			var style := button.get_theme_stylebox(state).duplicate() as StyleBoxFlat
+			style.content_margin_top = 3.0
+			style.content_margin_bottom = 3.0
+			style.content_margin_left = 6.0
+			style.content_margin_right = 6.0
+			button.add_theme_stylebox_override(state, style)
+
+	rival_prev_button.pressed.connect(
+		func() -> void: _set_rival(rival_index - 1)
+	)
+	rival_next_button.pressed.connect(
+		func() -> void: _set_rival(rival_index + 1)
+	)
+
+	_refresh_rival_card()
+
+func _rival_key() -> String:
+	return "%s_%d" % ["duboo" if duboo_mode else "classic", rival_index]
+
+func _refresh_rival_card() -> void:
+	if rival_portrait == null:
+		return
+	var profile: Dictionary = RIVALS[rival_index]
+	rival_portrait.texture = RIVAL_PORTRAITS[rival_index]
+	rival_name.text = str(profile["name"])
+	rival_alias.text = str(profile["alias"])
+	rival_type.text = str(profile["type"])
+	rival_bio.text = str(profile["bio"])
+	_refresh_rival_drawer_handle()
+	var results: Array = rival_results.get(_rival_key(), [0, 0, 0])
+	rival_record.text = "VS YOU  %d W  /  %d L  /  %d D" % [int(results[1]), int(results[0]), int(results[2])]
+	if mobile_rival_name != null:
+		_mobile_refresh_menu()
+
+func _set_rival(next_index: int) -> void:
+	var new_index := posmod(next_index, RIVALS.size())
+	if new_index == rival_index:
+		return
+	rival_index = new_index
+	var config := ConfigFile.new()
+	if FileAccess.file_exists(SETTINGS_PATH):
+		config.load(SETTINGS_PATH)
+	config.set_value("rivals", "selected", rival_index)
+	config.save(SETTINGS_PATH)
+	_refresh_rival_card()
+	# Avoid swapping a CPU's identity midway through its active match.
+	_new_match()
+	if sound_click != null:
+		sound_click.play()
+
+func _record_rival_match(result: int) -> void:
+	# result 0 = human win; 1 = rival win; 2 = draw.
+	if rival_match_recorded:
+		return
+	rival_match_recorded = true
+	var key := _rival_key()
+	var counts: Array = rival_results.get(key, [0, 0, 0]).duplicate()
+	counts[clampi(result, 0, 2)] = int(counts[clampi(result, 0, 2)]) + 1
+	rival_results[key] = counts
+	var config := ConfigFile.new()
+	if FileAccess.file_exists(SETTINGS_PATH):
+		config.load(SETTINGS_PATH)
+	config.set_value("rivals", key + "_win", int(counts[0]))
+	config.set_value("rivals", key + "_loss", int(counts[1]))
+	config.set_value("rivals", key + "_draw", int(counts[2]))
+	config.set_value("rivals", "selected", rival_index)
+	config.save(SETTINGS_PATH)
+	_refresh_rival_card()
 
 func _mobile_label(parent: Node, value: String, font_size: int, color: Color) -> Label:
 	var label := _label(parent, value, font_size, color, false)
@@ -745,6 +1053,25 @@ func _build_mobile_ui() -> void:
 		b.pressed.connect(_mobile_set_difficulty.bind(i))
 		mobile_menu_difficulties.append(b)
 
+	var rival_divider := HSeparator.new()
+	rival_divider.add_theme_color_override("color", EDGE_SOFT)
+	menu_content.add_child(rival_divider)
+	_label(menu_content, "YOUR RIVAL", 12, MINT)
+	var mobile_rival_row := HBoxContainer.new()
+	mobile_rival_row.name = "MenuRivalChoices"
+	mobile_rival_row.add_theme_constant_override("separation", 7)
+	menu_content.add_child(mobile_rival_row)
+	mobile_rival_prev = _make_button(mobile_rival_row, "PREV")
+	mobile_rival_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	mobile_rival_prev.pressed.connect(func() -> void: _set_rival(rival_index - 1))
+	mobile_rival_name = _label(mobile_rival_row, "DIEGO SOLIS", 14, TEXT, true)
+	mobile_rival_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mobile_rival_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	mobile_rival_next = _make_button(mobile_rival_row, "NEXT")
+	mobile_rival_next.size_flags_horizontal = Control.SIZE_SHRINK_END
+	mobile_rival_next.pressed.connect(func() -> void: _set_rival(rival_index + 1))
+	mobile_rival_bio = _label(menu_content, "", 12, MUTED, true)
+
 	var actions_divider := HSeparator.new()
 	actions_divider.add_theme_color_override("color", EDGE_SOFT)
 	menu_content.add_child(actions_divider)
@@ -820,6 +1147,10 @@ func _mobile_refresh_menu() -> void:
 	mobile_menu_style_count.text = "%02d / %02d" % [index + 1, names.size()]
 	for i in range(mobile_menu_difficulties.size()):
 		_mobile_button_skin(mobile_menu_difficulties[i], i == cpu_skill, mobile_mobile_scale)
+	if mobile_rival_name != null:
+		var selected: Dictionary = RIVALS[rival_index]
+		mobile_rival_name.text = str(selected["name"]) + "\n" + str(selected["alias"])
+		mobile_rival_bio.text = str(selected["bio"]) + "  Changing rivals starts a fresh match."
 	if mobile_menu_restart != null:
 		mobile_menu_restart.text = "NEW BOARD" if duboo_mode else "RESTART"
 	if mobile_menu_next_board != null:
@@ -991,6 +1322,7 @@ func _refresh_mode_ui() -> void:
 	if portrait_touch:
 		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nDrag the striker along the lower baseline to place it. Touch PULL BACK below the board. Drag backward to set shot angle and strength: down means shoot up, and sideways changes the angle. Release to fire. A very short pull cancels the shot. No timer and no need to hold."
 	_refresh_board_style_ui()
+	_refresh_rival_card()
 	_mobile_sync()
 	board.queue_redraw()
 
@@ -1044,6 +1376,7 @@ func _layout() -> void:
 	board.position = Vector2(board_left + 43.0 * scale_value, board_top + 43.0 * scale_value)
 	stats_panel.position = Vector2(gutter, gutter)
 	stats_panel.size = Vector2(stats_w, maxf(170.0, sz.y - 2.0 * gutter))
+	_layout_rival_drawer()
 	side_panel.position = Vector2(sz.x - info_w - gutter, gutter)
 	side_panel.size = Vector2(info_w, maxf(170.0, sz.y - 2.0 * gutter))
 	cpu_selector.get_popup().min_size = Vector2i(maxi(176, int(info_w - 44.0)), 0)
@@ -1218,6 +1551,12 @@ func _mobile_menu_layout(u: float) -> void:
 	for b in mobile_menu_difficulties:
 		b.custom_minimum_size.y = 48.0 * u
 		b.add_theme_font_size_override("font_size", maxi(12, int(round(13.5 * u))))
+	for b in [mobile_rival_prev, mobile_rival_next]:
+		b.custom_minimum_size = Vector2(62.0 * u, 44.0 * u)
+		b.add_theme_font_size_override("font_size", maxi(12, int(round(13.0 * u))))
+		_mobile_button_skin(b, false, u)
+	mobile_rival_name.add_theme_font_size_override("font_size", maxi(12, int(round(14.0 * u))))
+	mobile_rival_bio.add_theme_font_size_override("font_size", maxi(11, int(round(12.0 * u))))
 	var actions := content.get_node("MenuActions") as HBoxContainer
 	actions.add_theme_constant_override("separation", maxi(7, int(round(9.0 * u))))
 	for b in [mobile_menu_rules, mobile_menu_restart, mobile_menu_next_board]:
@@ -1229,10 +1568,15 @@ func _mobile_menu_layout(u: float) -> void:
 	_mobile_refresh_menu()
 
 func _load_board_style() -> void:
+	rival_index = randi_range(0, RIVALS.size() - 1)
 	var config := ConfigFile.new()
 	if FileAccess.file_exists(SETTINGS_PATH) and config.load(SETTINGS_PATH) == OK:
 		board_style_index = clampi(int(config.get_value("appearance", "board_style", 0)), 0, CarromBoard.STYLE_NAMES.size() - 1)
 		duboo_style_index = clampi(int(config.get_value("appearance", "duboo_table_style", 0)), 0, CarromBoard.DUBOO_STYLE_NAMES.size() - 1)
+		for game in ["classic", "duboo"]:
+			for idx in range(RIVALS.size()):
+				var key := "%s_%d" % [game, idx]
+				rival_results[key] = [int(config.get_value("rivals", key + "_win", 0)), int(config.get_value("rivals", key + "_loss", 0)), int(config.get_value("rivals", key + "_draw", 0))]
 
 func _save_board_style() -> void:
 	var config := ConfigFile.new()
@@ -1279,6 +1623,7 @@ func _new_match() -> void:
 	queen_owner = -1
 	pending_queen = -1
 	winner = -1
+	rival_match_recorded = false
 	_begin_board()
 
 func _begin_board() -> void:
@@ -1323,7 +1668,7 @@ func _begin_board() -> void:
 	if player_turn == 0:
 		_set_status("YOUR BREAK" if board_number == 1 else "YOUR TURN", "Move onto the bottom baseline and click to place your striker.")
 	else:
-		_set_status("CPU BREAK", "The computer is looking for its opening shot.")
+		_set_status("CPU BREAK", "%s is studying the opening." % str(RIVALS[rival_index]["alias"]))
 	_refresh_ui()
 	board.queue_redraw()
 
@@ -1873,7 +2218,7 @@ func _resolve_shot() -> void:
 		board.side = 1
 		_place_striker(1, 340.0)
 		cpu_time = 0.85
-		_set_status("CPU TURN  /  BLACK", result + " Computer is choosing its shot.")
+		_set_status("CPU TURN  /  BLACK", result + " %s is choosing a shot." % str(RIVALS[rival_index]["alias"]))
 	_refresh_ui()
 	board.queue_redraw()
 
@@ -1881,6 +2226,7 @@ func _end_board(board_winner: int, reason: String) -> void:
 	winner = board_winner
 	if duboo_mode:
 		phase = "match_over"
+		_record_rival_match(board_winner)
 		board.display_striker = false
 		board.show_aim = false
 		_set_status("YOU WIN DUBOO!" if board_winner == 0 else "CPU WINS DUBOO", reason + "  Select NEW BOARD to play again.")
@@ -1903,6 +2249,7 @@ func _end_board(board_winner: int, reason: String) -> void:
 	if match_over:
 		phase = "match_over"
 		var match_winner := 0 if totals[0] > totals[1] else 1
+		_record_rival_match(2 if totals[0] == totals[1] else match_winner)
 		if totals[0] == totals[1]:
 			_set_status("MATCH TIED", "Eight boards completed with equal points. Select NEW MATCH to play again.")
 		else:
@@ -2058,7 +2405,10 @@ func _cpu_start_search() -> void:
 	# Reserve slots for non-direct ideas even when simple pockets are present.
 	# Casual, Standard, Expert differ in BOTH search depth and shot precision.
 	var quotas: Array = [[7, 1, 1, 3], [12, 4, 3, 5], [19, 7, 6, 7]]
-	var limits: Array = quotas[clampi(cpu_skill, 0, 2)]
+	var limits: Array = (quotas[clampi(cpu_skill, 0, 2)] as Array).duplicate()
+	var quota_change: Array = RIVALS[rival_index]["quota"]
+	for i in range(4):
+		limits[i] = maxi(0, int(limits[i]) + int(quota_change[i]))
 	_cpu_reserve_candidates(direct, int(limits[0]), 3)
 	_cpu_reserve_candidates(banks, int(limits[1]), 2)
 	_cpu_reserve_candidates(combos, int(limits[2]), 2)
@@ -2184,8 +2534,9 @@ func _cpu_predict(candidate: Dictionary) -> float:
 			"striker": fouled = true
 	var initial_black: int = _pocketed_count("black")
 	var score: float = 160.0 * own - 135.0 * other
+	var personality: Dictionary = RIVALS[rival_index]
 	if own >= 2:
-		score += 42.0 * float(own - 1)  # A genuine multi-pocket is worth pursuing.
+		score += 42.0 * float(own - 1) * float(personality["multi"])
 	if fouled:
 		score -= 390.0
 	if queen:
@@ -2203,13 +2554,17 @@ func _cpu_predict(candidate: Dictionary) -> float:
 		else:
 			score -= 600.0  # Never deliberately lose by finishing too early.
 	var after_value: float = _cpu_position_value(test)
-	score += clampf((after_value - cpu_plan_base_value) * 0.55, -38.0, 38.0)
+	score += clampf((after_value - cpu_plan_base_value) * 0.55 * float(personality["position"]), -55.0, 55.0)
 	if own == 0:
 		score -= 22.0  # Losing your turn has a tactical cost.
 	if own == 0 and other == 0 and not queen:
 		score -= 8.0  # Discourage pointless hard breaks once spread out.
 	# Prefer reliable, short execution when simulated outcomes tie.
 	score += float(candidate["seed"]) * 0.038
+	# Preference matters on comparable outcomes; pocket count, Queen rules,
+	# and fouls still dominate. No artificial successes or physics changes.
+	var biases: Dictionary = personality["bias"]
+	score += float(biases.get(str(candidate.get("style", "direct")), 0.0))
 	return score
 
 func _cpu_search_frame() -> void:
@@ -2250,5 +2605,5 @@ func _cpu_search_frame() -> void:
 	board.queue_redraw()
 	phase = "cpu_aim"
 	cpu_time = 0.60
-	_set_status("CPU AIMING", "The computer has selected a shot.")
+	_set_status("CPU AIMING", "%s is lining up a shot." % str(RIVALS[rival_index]["alias"]))
 	_refresh_ui()
