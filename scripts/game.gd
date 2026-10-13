@@ -61,6 +61,21 @@ const RIVALS := [
 	 "bio": "Reads the board like a system. Values quiet positioning, blocked lanes, and the precise shot nobody expected.",
 	 "bias": {"safety": 24.0, "clear": 12.0, "touch": 12.0, "bank": 5.0}, "quota": [-2, 0, 0, 2], "position": 1.85, "multi": 1.0}
 ]
+# Nine one-liners per opponent, in the same order as RIVALS. Triggered only
+# after an unfouled CPU shot pockets one or more of its own pieces.
+const RIVAL_POCKET_QUOTES := [
+	["Clean landing. No wobble.", "Saw that gap from the start.", "That one had a nice line.", "Just rode the cushion.", "Sometimes the bank is the road.", "That pocket was calling.", "No brakes on that one.", "Little angle, big payoff.", "Roll with it."],
+	["Business as usual.", "I prefer certainty.", "Nothing personal. Just the board.", "A quiet move pays more.", "You left that door open.", "I collect what's available.", "The table keeps its own books.", "I never rush a sure thing.", "Consider that settled."],
+	["That one hit the chorus.", "Turn it up.", "Perfect timing, ugly noise.", "Caught the beat just right.", "Hear that? That's momentum.", "One take. No rehearsal.", "The board is my amplifier.", "That was a clean riff.", "Keep the tempo."],
+	["Rules are fine. Angles aren't.", "Did that bother you?", "Straight shots are overrated.", "Chaos has a nice sound.", "That cushion deserved it.", "Nothing neat about that.", "Try predicting the next one.", "Ugly shot. Beautiful result.", "Good luck with the leftovers."],
+	["Stay focused.", "That's repetition paying off.", "One point at a time.", "Good form. Clean finish.", "Trust the fundamentals.", "No wasted motion.", "Keep the pressure on.", "Eyes on the next one.", "I trained for that angle."],
+	["A clean line never fails.", "Presentation matters.", "Precision is always in style.", "That was effortless.", "Less force. More finesse.", "Such a pleasing finish.", "Make every touch count.", "No need to make a scene.", "Perfectly placed."],
+	["That's another bar.", "Caught the pocket on beat.", "Two moves ahead of the rhythm.", "Let the chain reaction speak.", "That's a clean drop.", "The board knows my name.", "A little bounce, a lot of flow.", "I don't waste a good setup.", "Run that back."],
+	["Target acquired.", "That route was optimal.", "Clean execution.", "The board gave away its weakness.", "Predictable trajectory.", "I found a better path.", "Your defense has an opening.", "Just a simple calculation.", "No glitches this time."]
+]
+const RIVAL_QUOTE_PEEK_HEIGHT := 167.0
+const RIVAL_QUOTE_DISPLAY_TIME := 4.6
+
 const RIVAL_PORTRAITS := [
 	preload("res://portraits/rival_01_skateboarder.png"),
 	preload("res://portraits/rival_02_gangster.png"),
@@ -116,6 +131,12 @@ var rival_drawer_scroll: ScrollContainer
 var rival_drawer_chevron: Line2D
 var rival_drawer_open := false
 var rival_drawer_tween: Tween
+var rival_quote_box: PanelContainer
+var rival_quote_heading: Label
+var rival_quote_text: Label
+var rival_quote_peek := false
+var rival_quote_time := 0.0
+var rival_last_quote: Dictionary = {}
 var mobile_rival_name: Label
 var mobile_rival_bio: Label
 var mobile_rival_prev: Button
@@ -683,6 +704,17 @@ func _build_rival_drawer() -> void:
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 8)
 	rival_drawer_scroll.add_child(content)
+	# An event-driven speech panel inside the existing drawer, never on the board.
+	rival_quote_box = PanelContainer.new()
+	rival_quote_box.add_theme_stylebox_override("panel", _style(Color("#28483f"), EDGE_SOFT, 10))
+	content.add_child(rival_quote_box)
+	var speech := VBoxContainer.new()
+	speech.add_theme_constant_override("separation", 3)
+	rival_quote_box.add_child(speech)
+	rival_quote_heading = _label(speech, "", 10, GOLD, true)
+	rival_quote_text = _label(speech, "", 12, TEXT, true)
+	rival_quote_text.custom_minimum_size.y = 48.0
+	rival_quote_box.hide()
 	_build_rival_card(content)
 	_refresh_rival_drawer_handle()
 
@@ -696,6 +728,42 @@ func _refresh_rival_drawer_handle() -> void:
 	if rival_drawer_chevron != null:
 		rival_drawer_chevron.rotation = PI if rival_drawer_open else 0.0
 
+func _rival_drawer_target_y() -> float:
+	if rival_drawer_open:
+		return 0.0
+	var height := stats_panel.size.y
+	if rival_quote_peek:
+		return maxf(0.0, height - minf(RIVAL_QUOTE_PEEK_HEIGHT, height * 0.75))
+	return maxf(0.0, height - RIVAL_DRAWER_HANDLE_HEIGHT)
+
+func _animate_rival_drawer() -> void:
+	if rival_drawer == null or portrait_touch:
+		return
+	if rival_drawer_tween != null and rival_drawer_tween.is_running():
+		rival_drawer_tween.kill()
+	rival_drawer_tween = create_tween()
+	rival_drawer_tween.set_trans(Tween.TRANS_CUBIC)
+	rival_drawer_tween.set_ease(Tween.EASE_OUT)
+	rival_drawer_tween.tween_property(rival_drawer, "position:y", _rival_drawer_target_y(), 0.27)
+
+func _show_rival_pocket_quote() -> void:
+	if rival_quote_box == null:
+		return
+	var lines: Array = RIVAL_POCKET_QUOTES[rival_index]
+	var previous := int(rival_last_quote.get(rival_index, -1))
+	var pick := randi_range(0, lines.size() - 1 if previous < 0 else lines.size() - 2)
+	if previous >= 0 and pick >= previous:
+		pick += 1
+	rival_last_quote[rival_index] = pick
+	rival_quote_heading.text = str(RIVALS[rival_index]["alias"]) + "  /  POCKETED"
+	rival_quote_text.text = str(lines[pick])
+	rival_quote_box.show()
+	rival_drawer_scroll.scroll_vertical = 0
+	if not rival_drawer_open and not portrait_touch:
+		rival_quote_peek = true
+		rival_quote_time = RIVAL_QUOTE_DISPLAY_TIME
+		_animate_rival_drawer()
+
 func _layout_rival_drawer() -> void:
 	if rival_drawer == null or stats_panel == null:
 		return
@@ -705,7 +773,7 @@ func _layout_rival_drawer() -> void:
 	var width := stats_panel.size.x
 	var height := stats_panel.size.y
 	rival_drawer.size = Vector2(width, height)
-	rival_drawer.position = Vector2(0.0, 0.0 if rival_drawer_open else maxf(0.0, height - RIVAL_DRAWER_HANDLE_HEIGHT))
+	rival_drawer.position = Vector2(0.0, _rival_drawer_target_y())
 	rival_drawer_handle.position = Vector2(7.0, 4.0)
 	rival_drawer_handle.size = Vector2(maxf(0.0, width - 14.0), RIVAL_DRAWER_HANDLE_HEIGHT - 8.0)
 	rival_drawer_chevron.position = Vector2(rival_drawer_handle.size.x - 23.0, rival_drawer_handle.size.y * 0.5)
@@ -716,13 +784,9 @@ func _toggle_rival_drawer() -> void:
 	if portrait_touch or rival_drawer == null:
 		return
 	rival_drawer_open = not rival_drawer_open
-	if rival_drawer_tween != null and rival_drawer_tween.is_running():
-		rival_drawer_tween.kill()
-	var target_y := 0.0 if rival_drawer_open else maxf(0.0, stats_panel.size.y - RIVAL_DRAWER_HANDLE_HEIGHT)
-	rival_drawer_tween = create_tween()
-	rival_drawer_tween.set_trans(Tween.TRANS_CUBIC)
-	rival_drawer_tween.set_ease(Tween.EASE_OUT)
-	rival_drawer_tween.tween_property(rival_drawer, "position:y", target_y, 0.27)
+	rival_quote_peek = false
+	rival_quote_time = 0.0
+	_animate_rival_drawer()
 	_refresh_rival_drawer_handle()
 	if rival_drawer_open:
 		rival_drawer_scroll.scroll_vertical = 0
@@ -833,6 +897,10 @@ func _set_rival(next_index: int) -> void:
 	var new_index := posmod(next_index, RIVALS.size())
 	if new_index == rival_index:
 		return
+	rival_quote_peek = false
+	rival_quote_time = 0.0
+	if rival_quote_box != null:
+		rival_quote_box.hide()
 	rival_index = new_index
 	var config := ConfigFile.new()
 	if FileAccess.file_exists(SETTINGS_PATH):
@@ -1615,6 +1683,12 @@ func _cycle_board_style(step: int) -> void:
 		sound_click.play()
 
 func _new_match() -> void:
+	rival_quote_peek = false
+	rival_quote_time = 0.0
+	if rival_quote_box != null:
+		rival_quote_box.hide()
+	if rival_drawer != null and not rival_drawer_open:
+		_animate_rival_drawer()
 	_cancel_mobile_charge()
 	mobile_board_finger = -1
 	board_number = 1
@@ -1996,6 +2070,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	mobile_ignore_synthetic_mouse = maxf(0.0, mobile_ignore_synthetic_mouse - delta)
+	if rival_quote_time > 0.0:
+		rival_quote_time = maxf(0.0, rival_quote_time - delta)
+		if rival_quote_time <= 0.0 and rival_quote_peek:
+			rival_quote_peek = false
+			_animate_rival_drawer()
 	# Browser/webview touchcancel is not always delivered. A dead pull must
 	# cancel itself, never fire a shot or strand the player in charging.
 	if portrait_touch and phase == "charging":
@@ -2183,6 +2262,10 @@ func _resolve_shot() -> void:
 			notices.append(_collect_outstanding_due(actor))
 	var own_after := _pocketed_count(own_kind)
 	var actor_has_scored := own_after > own_count_before
+	# Only legitimate CPU progress earns a line. One line per scoring shot,
+	# including double pockets, with no interruptions over the board.
+	if actor == 1 and actor_has_scored and not striker_in_shot:
+		_show_rival_pocket_quote()
 	if own_after >= 9:
 		if queen_owner != -1:
 			_end_board(actor, "All nine %s pieces pocketed!" % own_kind.to_upper())
