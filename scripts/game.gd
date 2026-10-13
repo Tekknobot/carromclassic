@@ -66,10 +66,16 @@ var restart_button: Button
 var cpu_selector: OptionButton
 var sound_shoot: AudioStreamPlayer
 var sound_pocket: AudioStreamPlayer
+var sound_pocket_alt: AudioStreamPlayer
 var sound_click: AudioStreamPlayer
+var sound_impact: AudioStreamPlayer
+var sound_rail: AudioStreamPlayer
+var impact_cooldown := 0.0
+var rail_cooldown := 0.0
 var title_label: Label
 var board_caption: Label
 var board_style_index: int = 0
+var duboo_style_index: int = 0
 var board_style_label: Label
 var board_style_prev: Button
 var board_style_next: Button
@@ -82,6 +88,7 @@ func _ready() -> void:
 	board = BOARD_SCENE.new()
 	add_child(board)
 	board.set_style(board_style_index)
+	board.set_duboo_style(duboo_style_index)
 	_build_ui()
 	_refresh_mode_ui()
 	_build_audio()
@@ -106,18 +113,71 @@ func _draw() -> void:
 		draw_line(Vector2(xx, 0), Vector2(xx, sz.y), Color(1, 1, 1, 0.018), 1.0)
 
 func _build_audio() -> void:
+	# Both modes share the same event system, but each has its own materials.
 	sound_shoot = AudioStreamPlayer.new()
-	sound_shoot.stream = load("res://audio/strike.wav")
-	sound_shoot.volume_db = -8.0
 	add_child(sound_shoot)
 	sound_pocket = AudioStreamPlayer.new()
-	sound_pocket.stream = load("res://audio/pocket.wav")
-	sound_pocket.volume_db = -6.0
 	add_child(sound_pocket)
+	# Two voices let rapid multi-pockets be heard rather than silently dropped.
+	sound_pocket_alt = AudioStreamPlayer.new()
+	add_child(sound_pocket_alt)
 	sound_click = AudioStreamPlayer.new()
 	sound_click.stream = load("res://audio/tick.wav")
 	sound_click.volume_db = -13.0
 	add_child(sound_click)
+	sound_impact = AudioStreamPlayer.new()
+	add_child(sound_impact)
+	sound_rail = AudioStreamPlayer.new()
+	add_child(sound_rail)
+	_refresh_mode_audio()
+
+func _refresh_mode_audio() -> void:
+	if sound_shoot == null or sound_pocket == null or sound_impact == null:
+		return
+	# Classic retains its familiar strike/drop; new wooden impacts fill the gaps.
+	sound_shoot.stream = load("res://audio/duboo_strike.wav") if duboo_mode else load("res://audio/strike.wav")
+	sound_pocket.stream = load("res://audio/duboo_pocket.wav") if duboo_mode else load("res://audio/pocket.wav")
+	sound_pocket_alt.stream = sound_pocket.stream
+	sound_impact.stream = load("res://audio/duboo_collision.wav") if duboo_mode else load("res://audio/classic_collision.wav")
+	sound_rail.stream = load("res://audio/duboo_rail.wav") if duboo_mode else load("res://audio/classic_rail.wav")
+	sound_shoot.volume_db = -8.5 if duboo_mode else -8.0
+	sound_pocket.volume_db = -7.5 if duboo_mode else -6.0
+	sound_pocket_alt.volume_db = sound_pocket.volume_db - 1.5
+	sound_shoot.pitch_scale = 1.0
+	sound_pocket.pitch_scale = 1.0
+	sound_pocket_alt.pitch_scale = 1.0
+	sound_impact.stop()
+	sound_rail.stop()
+	sound_pocket_alt.stop()
+	impact_cooldown = 0.0
+	rail_cooldown = 0.0
+
+func _play_impact_sfx(feedback: Array, delta: float) -> void:
+	# Strongest collision and rebound per short window. This avoids a wall
+	# of noise when many counters bump into one another during a break.
+	impact_cooldown = maxf(0.0, impact_cooldown - delta)
+	rail_cooldown = maxf(0.0, rail_cooldown - delta)
+	var strongest_hit := 0.0
+	var strongest_rail := 0.0
+	for event in feedback:
+		if event.get("type", "") == "collision":
+			strongest_hit = maxf(strongest_hit, float(event.get("speed", 0.0)))
+		elif event.get("type", "") == "rail":
+			strongest_rail = maxf(strongest_rail, float(event.get("speed", 0.0)))
+	var hit_threshold := 65.0 if duboo_mode else 55.0
+	var rail_threshold := 110.0 if duboo_mode else 95.0
+	if strongest_hit > hit_threshold and impact_cooldown <= 0.0:
+		var strength := clampf(strongest_hit / (650.0 if duboo_mode else 850.0), 0.0, 1.0)
+		sound_impact.volume_db = lerpf(-18.0, -9.5, strength) if duboo_mode else lerpf(-20.0, -11.0, strength)
+		sound_impact.pitch_scale = randf_range(0.94, 1.08) if duboo_mode else randf_range(0.97, 1.06)
+		sound_impact.play()
+		impact_cooldown = 0.082 if duboo_mode else 0.095
+	if strongest_rail > rail_threshold and rail_cooldown <= 0.0:
+		var strength := clampf(strongest_rail / (720.0 if duboo_mode else 880.0), 0.0, 1.0)
+		sound_rail.volume_db = lerpf(-19.0, -11.0, strength) if duboo_mode else lerpf(-22.0, -12.0, strength)
+		sound_rail.pitch_scale = randf_range(0.95, 1.07) if duboo_mode else randf_range(0.97, 1.05)
+		sound_rail.play()
+		rail_cooldown = 0.115 if duboo_mode else 0.13
 
 func _style(bg: Color, border: Color = Color.TRANSPARENT, radius: int = 12) -> StyleBoxFlat:
 	var st := StyleBoxFlat.new()
@@ -331,6 +391,7 @@ func _set_mode(use_duboo: bool) -> void:
 	duboo_mode = use_duboo
 	board.duboo_mode = duboo_mode
 	_refresh_mode_ui()
+	_refresh_mode_audio()
 	_new_match()
 	if sound_click != null:
 		sound_click.play()
@@ -345,8 +406,10 @@ func _refresh_mode_ui() -> void:
 		b.add_theme_color_override("font_color", INK if selected else TEXT)
 		b.add_theme_color_override("font_hover_color", INK if selected else TEXT)
 		b.add_theme_color_override("font_pressed_color", INK if selected else TEXT)
-	style_heading.visible = not duboo_mode
-	style_selector.visible = not duboo_mode
+	# Reuse the original appearance selector for both modes. No extra controls.
+	style_heading.visible = true
+	style_heading.text = "DUBOO TABLE" if duboo_mode else "BOARD APPEARANCE"
+	style_selector.visible = true
 	restart_button.text = "NEW BOARD" if duboo_mode else "NEW MATCH"
 	if rules_body != null:
 		if duboo_mode:
@@ -400,21 +463,37 @@ func _load_board_style() -> void:
 	var config := ConfigFile.new()
 	if FileAccess.file_exists(SETTINGS_PATH) and config.load(SETTINGS_PATH) == OK:
 		board_style_index = clampi(int(config.get_value("appearance", "board_style", 0)), 0, CarromBoard.STYLE_NAMES.size() - 1)
+		duboo_style_index = clampi(int(config.get_value("appearance", "duboo_table_style", 0)), 0, CarromBoard.DUBOO_STYLE_NAMES.size() - 1)
 
 func _save_board_style() -> void:
 	var config := ConfigFile.new()
+	# Read first so previously saved settings survive this single-field update.
+	if FileAccess.file_exists(SETTINGS_PATH):
+		config.load(SETTINGS_PATH)
 	config.set_value("appearance", "board_style", board_style_index)
+	config.set_value("appearance", "duboo_table_style", duboo_style_index)
 	config.save(SETTINGS_PATH)
 
 func _refresh_board_style_ui() -> void:
-	if board_style_label != null:
-		board_style_label.text = "%02d / 08\n%s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]]
-	if board_caption != null:
-		board_caption.text = "DUBOO  /  SLATE TABLE  /  OVERSIZE OPEN RING" if duboo_mode else ("STYLE %02d / 08  /  %s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]])
+	if duboo_mode:
+		var name := str(CarromBoard.DUBOO_STYLE_NAMES[duboo_style_index])
+		if board_style_label != null:
+			board_style_label.text = "%02d / %02d\n%s" % [duboo_style_index + 1, CarromBoard.DUBOO_STYLE_NAMES.size(), name]
+		if board_caption != null:
+			board_caption.text = "DUBOO  /  %s  /  MARBLE TABLE" % name
+	else:
+		if board_style_label != null:
+			board_style_label.text = "%02d / %02d\n%s" % [board_style_index + 1, CarromBoard.STYLE_NAMES.size(), CarromBoard.STYLE_NAMES[board_style_index]]
+		if board_caption != null:
+			board_caption.text = "STYLE %02d / 08  /  %s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]]
 
 func _cycle_board_style(step: int) -> void:
-	board_style_index = posmod(board_style_index + step, CarromBoard.STYLE_NAMES.size())
-	board.set_style(board_style_index)
+	if duboo_mode:
+		duboo_style_index = posmod(duboo_style_index + step, CarromBoard.DUBOO_STYLE_NAMES.size())
+		board.set_duboo_style(duboo_style_index)
+	else:
+		board_style_index = posmod(board_style_index + step, CarromBoard.STYLE_NAMES.size())
+		board.set_style(board_style_index)
 	_refresh_board_style_ui()
 	_save_board_style()
 	if sound_click != null:
@@ -635,10 +714,13 @@ func _shoot(direction: Vector2, power: float) -> void:
 	own_count_before = _pocketed_count(_kind_for(player_turn))
 	shot_duration = 0.0
 	last_shot_pockets.clear()
+	impact_cooldown = 0.05
+	rail_cooldown = 0.04
 	board.display_striker = false
 	board.show_aim = false
 	board.show_cpu_target = false
 	board.charging = false
+	sound_shoot.pitch_scale = randf_range(0.98, 1.035) if duboo_mode else randf_range(0.98, 1.025)
 	sound_shoot.play()
 	_set_status("PIECES IN MOTION", "Watch the shot settle. Pocket your color to keep the turn.")
 	_refresh_ui()
@@ -652,12 +734,16 @@ func _physics_process(delta: float) -> void:
 	shot_duration += delta
 	# Four small substeps stabilize grazing impacts on the faster marble table.
 	var substeps := 4 if duboo_mode else 2
+	var feedback: Array = []
 	for _substep in range(substeps):
-		var fallen: Array[int] = PHYSICS.advance(discs, delta / float(substeps), duboo_mode)
+		var fallen: Array[int] = PHYSICS.advance(discs, delta / float(substeps), duboo_mode, feedback)
 		for piece_id in fallen:
 			last_shot_pockets.append(piece_id)
-			if not sound_pocket.playing:
-				sound_pocket.play()
+			var pocket_voice: AudioStreamPlayer = sound_pocket if not sound_pocket.playing else sound_pocket_alt
+			if not pocket_voice.playing:
+				pocket_voice.pitch_scale = randf_range(0.94, 1.04) if duboo_mode else randf_range(0.97, 1.035)
+				pocket_voice.play()
+	_play_impact_sfx(feedback, delta)
 	board.queue_redraw()
 	if (shot_duration > 0.35 and PHYSICS.is_still(discs)) or shot_duration >= (18.0 if duboo_mode else 12.0):
 		for d in discs:

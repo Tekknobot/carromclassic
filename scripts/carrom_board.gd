@@ -27,7 +27,30 @@ const STYLE_PALETTES := [
 	{"outer": "#080e22", "rim": "#25234b", "trim": "#a852bb", "inner": "#10142e", "lip": "#152c40", "surface": "#131e36", "ink": "#73e3e8", "mark": "#f674ba", "detail": "#697cd7", "pocket": "#050b1b", "pocket_ring": "#70d7e4", "grain": "#36618c"}
 ]
 
+
+# Duboo table collection. All eight share EXACTLY the same pocket and physics
+# geometry; only the carved stone, border, and inlay change.
+const DUBOO_STYLE_NAMES := [
+	"CLUB SLATE", "WHITE CARRARA", "BLACK BASALT", "EMERALD MARBLE",
+	"BLUE GRANITE", "SAND TRAVERTINE", "ROSE ONYX", "SMOKED TERRAZZO"
+]
+const DUBOO_STYLE_PALETTES := [
+	{"outer":"#191719", "rim":"#704e3d", "trim":"#bc9169", "inner":"#27322c", "bevel":"#526a60", "surface":"#314b47", "vein":"#bdd5c9", "inlay":"#d8e3da", "accent":"#b79572", "pocket":"#091413", "pocket_rim":"#817667", "glint":"#b9d8ca"},
+	{"outer":"#312c2a", "rim":"#755943", "trim":"#c4a47e", "inner":"#d5cfc2", "bevel":"#e4decf", "surface":"#e8e2d6", "vein":"#88867f", "inlay":"#5a7770", "accent":"#997d5b", "pocket":"#181b1b", "pocket_rim":"#c2b4a1", "glint":"#ffffff"},
+	{"outer":"#101314", "rim":"#313638", "trim":"#8c8170", "inner":"#171c20", "bevel":"#343a3d", "surface":"#20282b", "vein":"#7c9091", "inlay":"#c1b69e", "accent":"#a39275", "pocket":"#070b0e", "pocket_rim":"#736e64", "glint":"#ced6d0"},
+	{"outer":"#102622", "rim":"#305c4d", "trim":"#c7a46e", "inner":"#214337", "bevel":"#396d5a", "surface":"#1b5145", "vein":"#8cc3a3", "inlay":"#e9d8b1", "accent":"#d1b478", "pocket":"#091b18", "pocket_rim":"#9a9879", "glint":"#b9e6c8"},
+	{"outer":"#171e2c", "rim":"#364962", "trim":"#9aadc4", "inner":"#263b52", "bevel":"#415c74", "surface":"#304b67", "vein":"#a4c5d8", "inlay":"#e0e8e4", "accent":"#c0ad8d", "pocket":"#0d1926", "pocket_rim":"#799ab0", "glint":"#bbd9e7"},
+	{"outer":"#3b3024", "rim":"#7e6247", "trim":"#ba936d", "inner":"#baa17d", "bevel":"#d3bc98", "surface":"#d1bb95", "vein":"#79644b", "inlay":"#63533b", "accent":"#876a49", "pocket":"#262015", "pocket_rim":"#9e8260", "glint":"#fff0d0"},
+	{"outer":"#2b1621", "rim":"#694050", "trim":"#d1a79d", "inner":"#6b3d4b", "bevel":"#935c6b", "surface":"#794555", "vein":"#e7b9b1", "inlay":"#f4dec8", "accent":"#d5a5a0", "pocket":"#210f19", "pocket_rim":"#b88686", "glint":"#f6cdd3"},
+	{"outer":"#171919", "rim":"#393c3a", "trim":"#bdaf97", "inner":"#444745", "bevel":"#676861", "surface":"#4e5350", "vein":"#e7d7bd", "inlay":"#f2e2c8", "accent":"#dfbd8f", "pocket":"#111716", "pocket_rim":"#a4a39a", "glint":"#ffffff"},
+]
+
 var style_index: int = 0
+var duboo_style_index: int = 0
+
+func set_duboo_style(value: int) -> void:
+	duboo_style_index = posmod(value, DUBOO_STYLE_NAMES.size())
+	queue_redraw()
 
 func set_style(value: int) -> void:
 	style_index = posmod(value, STYLE_NAMES.size())
@@ -70,7 +93,11 @@ func _draw() -> void:
 	# Subtle highlight of active player's placement zone.
 	if display_striker:
 		var baseline_y := base_y(side, duboo_mode)
-		var ac := (Color("#cde8de") if side == 0 else Color("#d9b993")) if duboo_mode else ((Color("#68e9ed") if side == 0 else Color("#f4ad7b")) if style_index == 7 else (GLOW if side == 0 else Color("#e3b87d")))
+		var ac: Color = GLOW if side == 0 else Color("#e3b87d")
+		if duboo_mode:
+			ac = Color(str(DUBOO_STYLE_PALETTES[duboo_style_index]["inlay"])) if side == 0 else Color(str(DUBOO_STYLE_PALETTES[duboo_style_index]["accent"]))
+		elif style_index == 7:
+			ac = Color("#68e9ed") if side == 0 else Color("#f4ad7b")
 		var zone_left := 112.0 if duboo_mode else 132.0
 		var zone_right := 568.0 if duboo_mode else 548.0
 		draw_line(Vector2(zone_left, baseline_y), Vector2(zone_right, baseline_y), Color(ac, 0.21), 5.0, true)
@@ -82,60 +109,120 @@ func _draw() -> void:
 
 
 func _draw_duboo_board() -> void:
-	# Karachi-inspired slate / marble club table. Unlike Classic, the markings
-	# are small relative to the expansive surface; counters and ring are scaled
-	# separately by the Duboo physics profile.
-	var slate := Color("#314b47")
-	var white_line := Color("#cad9d0")
-	var gold := Color("#a98664")
-	# Thick dark wood table frame and bevel; playing geometry stays inside 680.
-	draw_rect(Rect2(-43, -43, 766, 766), Color("#1d1615"))
-	draw_rect(Rect2(-39, -39, 758, 758), Color("#72503c"))
-	draw_rect(Rect2(-33, -33, 746, 746), Color("#ba8c62"))
-	draw_rect(Rect2(-27, -27, 734, 734), Color("#2e2320"))
-	draw_rect(Rect2(-19, -19, 718, 718), Color("#182824"))
-	draw_rect(Rect2(-9, -9, 698, 698), Color("#516960"))
-	draw_rect(Rect2(0, 0, S, S), slate)
-	# Marble mottling and very fine veins, deterministic for web playback.
-	for k in range(85):
-		var yy: float = float((k * 179 + 49) % 672) + 3.0
-		var xx: float = float((k * 107 + 63) % 475) - 60.0
-		var span: float = 135.0 + float(k % 5) * 48.0
-		var strand := PackedVector2Array()
-		for n in range(8):
-			var t := float(n) / 7.0
-			strand.append(Vector2(clampf(xx + span * t, 1.0, S - 1.0), clampf(yy + 9.0 * sin(6.0 * t + float(k)), 1.0, S - 1.0)))
-		draw_polyline(strand, Color("#d7e6dc", 0.018 if k % 4 else 0.044), 0.75, true)
-	for k in range(8):
-		var glint_y := 23.0 + float(k) * 89.0
-		draw_line(Vector2(14.0, glint_y), Vector2(665.0, glint_y + 8.0), Color("#afcac0", 0.015), 9.0, true)
-	# Compact centre diagram (the older Duboo patch used Classic's giant circle).
-	var c := Vector2(340.0, 340.0)
-	draw_arc(c, 51.0, 0.0, TAU, 100, Color(white_line, 0.72), 1.7, true)
-	draw_arc(c, 9.0, 0.0, TAU, 36, Color(white_line, 0.72), 1.4, true)
-	draw_line(c + Vector2(-62, 0), c + Vector2(62, 0), Color(white_line, 0.37), 1.0, true)
-	draw_line(c + Vector2(0, -62), c + Vector2(0, 62), Color(white_line, 0.37), 1.0, true)
-	# Double starting lines near each cushion; much closer to the edge than Classic.
+	# All Duboo designs use the same 680px playable square and the same compact
+	# pocket sizes, rack, baselines, and oversize hollow ring.
+	var p: Dictionary = DUBOO_STYLE_PALETTES[duboo_style_index]
+	var outer := Color(str(p["outer"]))
+	var rim := Color(str(p["rim"]))
+	var trim := Color(str(p["trim"]))
+	var inner := Color(str(p["inner"]))
+	var bevel := Color(str(p["bevel"]))
+	var surface := Color(str(p["surface"]))
+	var vein := Color(str(p["vein"]))
+	var inlay := Color(str(p["inlay"]))
+	var accent := Color(str(p["accent"]))
+	var pocket_color := Color(str(p["pocket"]))
+	var pocket_rim := Color(str(p["pocket_rim"]))
+	var glint := Color(str(p["glint"]))
+	# Preserve original Duboo frame dimensions exactly, keeping the UI gutters.
+	draw_rect(Rect2(-43, -43, 766, 766), outer)
+	draw_rect(Rect2(-39, -39, 758, 758), rim)
+	draw_rect(Rect2(-34, -34, 748, 748), trim)
+	draw_rect(Rect2(-28, -28, 736, 736), inner)
+	draw_rect(Rect2(-19, -19, 718, 718), bevel)
+	draw_rect(Rect2(-9, -9, 698, 698), inner)
+	draw_rect(Rect2(0, 0, S, S), surface)
+	# Each material has its own restrained, deterministic surface pattern.
+	# No textures to import, no shaders, and no per-frame random flicker.
+	match duboo_style_index:
+		0: # Fine green slate veins and long soft polishing passes.
+			for k in range(85):
+				var y := float((k * 179 + 49) % 672) + 3.0
+				var x := float((k * 107 + 63) % 475) - 60.0
+				var points := PackedVector2Array()
+				for n in range(8):
+					var t := float(n) / 7.0
+					points.append(Vector2(clampf(x + (135.0 + float(k % 5) * 48.0) * t, 1.0, S - 1.0), clampf(y + 9.0 * sin(6.0 * t + float(k)), 1.0, S - 1.0)))
+				draw_polyline(points, Color(vein, 0.025 if k % 4 else 0.065), 0.75, true)
+			for k in range(7):
+				var y := 24.0 + float(k) * 94.0
+				draw_line(Vector2(14, y), Vector2(665, y + 9.0), Color(glint, 0.025), 8.0, true)
+		1: # Carrara: broad diagonal, branching grey veins.
+			for k in range(25):
+				var x := -140.0 + float(k) * 46.0
+				var line := PackedVector2Array()
+				for n in range(14):
+					var t := float(n) / 13.0
+					line.append(Vector2(clampf(x + 410.0 * t + 8.0 * sin(t * 9.0 + float(k)), 1.0, S - 1.0), 680.0 * t))
+				draw_polyline(line, Color(vein, 0.05 if k % 3 else 0.16), 0.75 if k % 3 else 2.0, true)
+			for k in range(12):
+				var a := Vector2(float((k * 153 + 41) % 680), float((k * 187 + 97) % 680))
+				draw_line(a, Vector2(clampf(a.x + 55.0, 1.0, S - 1.0), clampf(a.y - 32.0, 1.0, S - 1.0)), Color(vein, 0.11), 1.1, true)
+		2: # Basalt: dark mineral flecks and occasional tiny fractures.
+			for k in range(340):
+				var pt := Vector2(float((k * 173 + 13) % 666) + 7.0, float((k * 251 + 37) % 666) + 7.0)
+				draw_circle(pt, 0.45 + float(k % 4) * 0.35, Color(glint, 0.06 if k % 5 else 0.17))
+			for k in range(11):
+				var a := Vector2(float((k * 111 + 63) % 500) + 30.0, float((k * 163 + 23) % 600) + 20.0)
+				draw_line(a, Vector2(clampf(a.x + 28.0, 1.0, S - 1.0), clampf(a.y + 45.0, 1.0, S - 1.0)), Color(vein, 0.07), 1.0, true)
+		3: # Serpentine: sinuous quartz strands in deep green.
+			for k in range(35):
+				var strand := PackedVector2Array()
+				for n in range(25):
+					var t := float(n) / 24.0
+					strand.append(Vector2(t * S, clampf(28.0 + float(k) * 19.0 + 15.0 * sin(t * 11.0 + float(k) * 0.65), 1.0, S - 1.0)))
+				draw_polyline(strand, Color(vein, 0.035 if k % 4 else 0.16), 0.9 if k % 4 else 2.8, true)
+		4: # Blue granite: a densely mineralised, polished surface.
+			for k in range(460):
+				var pt := Vector2(float((k * 127 + 21) % 668) + 6.0, float((k * 239 + 29) % 668) + 6.0)
+				draw_circle(pt, 0.5 + float(k % 4) * 0.32, Color(vein if k % 3 != 0 else glint, 0.08 if k % 7 != 0 else 0.24))
+			for k in range(9):
+				var y := float(k) * 79.0 + 13.0
+				draw_line(Vector2(14, y), Vector2(666, y + 18.0), Color(glint, 0.027), 7.0, true)
+		5: # Travertine: sedimentary horizontal layers and small pores.
+			for k in range(62):
+				var y := 8.0 + float(k) * 11.0
+				draw_line(Vector2(5, y), Vector2(S - 5.0, y + 2.0 * sin(float(k))), Color(vein, 0.05 if k % 5 else 0.18), 0.85 if k % 5 else 2.5, true)
+			for k in range(150):
+				var pt := Vector2(float((k * 241 + 61) % 656) + 12, float((k * 97 + 13) % 652) + 14)
+				draw_circle(pt, 0.55 + float(k % 3) * 0.6, Color(vein, 0.09), true)
+		6: # Rose onyx: long layered curves with pale translucent veins.
+			for k in range(40):
+				var strand := PackedVector2Array()
+				for n in range(25):
+					var t := float(n) / 24.0
+					strand.append(Vector2(t * S, clampf(18.0 + float(k) * 17.0 + 21.0 * sin(t * 8.0 + float(k) * 0.34), 1.0, S - 1.0)))
+				draw_polyline(strand, Color(vein, 0.035 if k % 5 else 0.20), 1.0 if k % 5 else 3.5, true)
+		7: # Terrazzo: polished stone aggregate chips with no busy grain.
+			for k in range(190):
+				var x := float((k * 167 + 47) % 652) + 14.0
+				var y := float((k * 283 + 89) % 652) + 14.0
+				var r := 1.5 + float(k % 5) * 0.7
+				var points := PackedVector2Array([Vector2(x - r, y - r * 0.4), Vector2(x + r * 0.7, y - r), Vector2(x + r, y + r * 0.45), Vector2(x - r * 0.45, y + r)])
+				draw_colored_polygon(points, Color(vein if k % 3 != 0 else glint, 0.14 if k % 4 != 0 else 0.25))
+	# Inlaid rings and baselines are consistent across designs and easy to read.
+	var c := Vector2(S * 0.5, S * 0.5)
+	draw_arc(c, 51.0, 0, TAU, 100, Color(inlay, 0.70), 1.65, true)
+	draw_arc(c, 9.0, 0, TAU, 36, Color(inlay, 0.72), 1.4, true)
+	draw_line(c + Vector2(-62, 0), c + Vector2(62, 0), Color(inlay, 0.32), 1.0, true)
+	draw_line(c + Vector2(0, -62), c + Vector2(0, 62), Color(inlay, 0.32), 1.0, true)
+	if duboo_style_index == 3 or duboo_style_index == 6:
+		draw_arc(c, 59.0, 0, TAU, 100, Color(accent, 0.36), 1.0, true)
 	for face in range(4):
 		var y1 := 612.0
 		var y2 := 628.0
 		var x1 := 108.0
 		var x2 := 572.0
-		var left_a := _rotate_board(Vector2(x1, y1), face)
-		var right_a := _rotate_board(Vector2(x2, y1), face)
-		var left_b := _rotate_board(Vector2(x1, y2), face)
-		var right_b := _rotate_board(Vector2(x2, y2), face)
-		draw_line(left_a, right_a, Color(white_line, 0.68), 1.65, true)
-		draw_line(left_b, right_b, Color(white_line, 0.68), 1.65, true)
+		draw_line(_rotate_board(Vector2(x1, y1), face), _rotate_board(Vector2(x2, y1), face), Color(inlay, 0.75), 1.6, true)
+		draw_line(_rotate_board(Vector2(x1, y2), face), _rotate_board(Vector2(x2, y2), face), Color(inlay, 0.75), 1.6, true)
 		for endpoint in [x1, x2]:
 			var ep := _rotate_board(Vector2(endpoint, 620.0), face)
-			draw_arc(ep, 8.3, 0.0, TAU, 36, Color(white_line, 0.72), 1.5, true)
-	# The pocket mouths are visibly smaller than the giant ring striker.
+			draw_arc(ep, 8.3, 0, TAU, 36, Color(inlay, 0.76), 1.5, true)
 	for pocket in CarromPhysics.POCKETS:
-		draw_circle(pocket, 21.0, Color("#796b58"))
-		draw_circle(pocket, 18.0, Color("#28342f"))
-		draw_circle(pocket, CarromPhysics.DUBOO_POCKET_RADIUS + 0.2, Color("#071314"))
-		draw_arc(pocket, 20.0, 0.18, PI * 1.4, 44, Color(gold, 0.64), 1.15, true)
+		draw_circle(pocket, 21.0, pocket_rim)
+		draw_circle(pocket, 18.0, inner)
+		draw_circle(pocket, CarromPhysics.DUBOO_POCKET_RADIUS + 0.2, pocket_color)
+		draw_arc(pocket, 20.0, 0.18, PI * 1.4, 44, Color(accent, 0.68), 1.1, true)
 
 func _draw_classic_board() -> void:
 	# Cast-shadow, solid wood frame, inner inset and warm playing veneer.
@@ -408,6 +495,11 @@ func _draw_discs() -> void:
 				fill = Color("#c4423a")
 				outer = Color("#6d2525")
 				ornament = Color("#e6a78b")
+		# Preserve coin silhouettes on dark or pale Duboo stone finishes.
+		if duboo_mode and kind == "black" and duboo_style_index in [0, 2, 3, 4, 6, 7]:
+			draw_circle(pos, rad + 1.15, Color(str(DUBOO_STYLE_PALETTES[duboo_style_index]["inlay"]), 0.58), true, -1, true)
+		elif duboo_mode and kind == "white" and duboo_style_index in [1, 5]:
+			draw_circle(pos, rad + 1.1, Color("#695943", 0.67), true, -1, true)
 		# Black carrommen need an extra contrasting silhouette on dark skins.
 		if not duboo_mode and style_index in [1, 5, 7] and kind == "black":
 			draw_circle(pos, rad + 1.9, Color("#c6b895") if style_index != 7 else Color("#7fdbe7"), true, -1, true)

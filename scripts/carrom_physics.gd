@@ -44,7 +44,7 @@ static func radius_for(kind: String, duboo: bool = false) -> float:
 # Every impact operates on ring geometry in Duboo: a smaller counter can sit in
 # the empty centre without colliding with an imaginary solid disc. Classic uses
 # the untouched ordinary-disc solver below.
-static func _resolve_ring_contact(ring: Dictionary, coin: Dictionary) -> void:
+static func _resolve_ring_contact(ring: Dictionary, coin: Dictionary, feedback: Array) -> void:
 	var offset: Vector2 = coin["pos"] - ring["pos"]
 	var dist: float = maxf(0.0001, offset.length())
 	var n: Vector2 = offset / dist
@@ -80,11 +80,13 @@ static func _resolve_ring_contact(ring: Dictionary, coin: Dictionary) -> void:
 	coin["pos"] += normal * penetration * inverse_coin / inverse_total
 	var normal_speed: float = (coin["vel"] - ring["vel"]).dot(normal)
 	if normal_speed < 0.0:
+		if -normal_speed > 65.0:
+			feedback.append({"type": "collision", "speed": -normal_speed})
 		var impulse: float = -(1.0 + DUBOO_RING_BOUNCE) * normal_speed / inverse_total
 		ring["vel"] -= normal * impulse * inverse_ring
 		coin["vel"] += normal * impulse * inverse_coin
 
-static func advance(discs: Array, dt: float, duboo: bool = false) -> Array[int]:
+static func advance(discs: Array, dt: float, duboo: bool = false, feedback: Array = []) -> Array[int]:
 	var rail_bounce := DUBOO_RAIL_BOUNCE if duboo else RAIL_BOUNCE
 	var coin_bounce := DUBOO_COIN_BOUNCE if duboo else COIN_BOUNCE
 	var stop_speed := DUBOO_MIN_SPEED if duboo else MIN_SPEED
@@ -100,7 +102,7 @@ static func advance(discs: Array, dt: float, duboo: bool = false) -> Array[int]:
 			if duboo and (a["kind"] == "striker" or b["kind"] == "striker"):
 				var ring: Dictionary = a if a["kind"] == "striker" else b
 				var coin: Dictionary = b if a["kind"] == "striker" else a
-				_resolve_ring_contact(ring, coin)
+				_resolve_ring_contact(ring, coin, feedback)
 				continue
 			var offset: Vector2 = b["pos"] - a["pos"]
 			var radii: float = a["radius"] + b["radius"]
@@ -115,6 +117,8 @@ static func advance(discs: Array, dt: float, duboo: bool = false) -> Array[int]:
 			b["pos"] += n * overlap * (1.0 / b["mass"]) / total_inv_mass
 			var normal_speed: float = (b["vel"] - a["vel"]).dot(n)
 			if normal_speed < 0.0:
+				if -normal_speed > (65.0 if duboo else 55.0):
+					feedback.append({"type": "collision", "speed": -normal_speed})
 				var impulse: float = -(1.0 + coin_bounce) * normal_speed / total_inv_mass
 				a["vel"] -= n * impulse / a["mass"]
 				b["vel"] += n * impulse / b["mass"]
@@ -146,15 +150,23 @@ static func advance(discs: Array, dt: float, duboo: bool = false) -> Array[int]:
 			continue
 		var radius: float = disc["radius"]
 		if position.x < radius:
+			if velocity.x < (-110.0 if duboo else -95.0):
+				feedback.append({"type": "rail", "speed": -velocity.x})
 			position.x = radius
 			velocity.x = absf(velocity.x) * bounce
 		elif position.x > SURFACE - radius:
+			if velocity.x > (110.0 if duboo else 95.0):
+				feedback.append({"type": "rail", "speed": velocity.x})
 			position.x = SURFACE - radius
 			velocity.x = -absf(velocity.x) * bounce
 		if position.y < radius:
+			if velocity.y < (-110.0 if duboo else -95.0):
+				feedback.append({"type": "rail", "speed": -velocity.y})
 			position.y = radius
 			velocity.y = absf(velocity.y) * bounce
 		elif position.y > SURFACE - radius:
+			if velocity.y > (110.0 if duboo else 95.0):
+				feedback.append({"type": "rail", "speed": velocity.y})
 			position.y = SURFACE - radius
 			velocity.y = -absf(velocity.y) * bounce
 		disc["pos"] = position

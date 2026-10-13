@@ -7,7 +7,7 @@ Godot 4.6 project. Open `project.godot` and run `scenes/main.tscn`.
 - **Classic**: The original eight-board / first-to-25 Carrom match, eight board skins, CPU difficulty levels, original rules and physics.
 - **Duboo**: Karachi-inspired slate/marble-table interpretation with a noticeably more spacious layout, smaller playing pieces and a much larger, hollow acrylic ring shooter. One board decides the winner. Nine white, nine black and the Queen remain, with Classic's adapted Queen-cover rules; the ring is too large to fit in a pocket, so ring-pocket fouls don't occur. This is a regional-inspired game mode, not a claim to reproduce a universal Duboo rulebook.
 
-Changing modes restarts the current match. The board style selector is hidden while playing Duboo and restored when returning to Classic.
+Changing modes restarts the current match. The existing appearance selector is available in both modes, with **independent saved selections**: eight Classic wooden boards and eight Duboo stone finishes. Switching a table finish during play is cosmetic and does not reset a game.
 
 ## Mouse controls — identical in both modes
 
@@ -43,10 +43,21 @@ Duboo shot velocity stays 250–1080, separate from Classic's 320–1425. Player
 
 ## Art direction
 
-- Dark green-grey veined marble/slate, wooden border, small white inlaid center diagram and baseline markings.
+- Eight individual Duboo stone finishes: **Club Slate, White Carrara, Black Basalt, Emerald Marble, Blue Granite, Sand Travertine, Rose Onyx, and Smoked Terrazzo**. Every finish uses its own stone coloration, procedural grain/veins/aggregate, trim, pocket rims, and contrasted playing marks.
 - Narrow, smaller corner pocket mouths and a compact central rack.
-- Oversized translucent magenta acrylic ring with the **table visible through its open middle**. The ring is approximately 3.3 times the diameter of a Duboo coin.
+- Oversized ivory-toned hollow ring with the **table visible through its open middle**. The ring is approximately 3.3 times the diameter of a Duboo coin.
 - Classic retains the original wooden boards and familiar small solid striker.
+
+## Duboo sound design
+
+Duboo uses four newly synthesized short, dry samples (source WAVs in `audio/`):
+
+- `duboo_strike.wav`: low, hollow acrylic-ring contact against polished stone.
+- `duboo_collision.wav`: crisp counter-on-counter/ring collision, pitch and loudness varied by impact.
+- `duboo_rail.wav`: softened stone/cushion return, pitch and loudness varied by speed.
+- `duboo_pocket.wav`: small edge tick followed by a restrained cavity knock.
+
+Physics collision sounds are rate-limited to avoid noisy, constant retriggering during clustered strikes. Switching back to Classic restores the original strike and pocket WAVs; Classic physics triggers no Duboo collision/rail SFX. These samples are original synthetic sound design, not recordings from a Pakistani club.
 
 ## Layout
 
@@ -57,3 +68,13 @@ The full 766px outer frame is reserved separately from the top mode selector and
 - Duboo uses a ring-aware collision solver for the striker, not a solid-circle approximation.
 - Duboo is regionally varied. The single-board objective and Classic-compatible Queen/foul rules are explicit game-design choices, not claims about all Pakistani club rules.
 - Physics effects and rendering should be play-tested in the Godot editor / web export, especially CPU accuracy and the feel of long glides.
+
+
+### Mode-specific sound effects
+Both Classic and Duboo now play strike, piece collision, rail rebound, and pocket
+sounds for either player's turn. Classic uses the original `strike.wav` and
+`pocket.wav`, plus lighter `classic_collision.wav` and `classic_rail.wav`. Duboo
+uses the four `duboo_*.wav` sounds. Collision and rail playback uses the strongest
+impact in a short window, avoiding excessive overlap during clustered shots.
+Two pocket voices allow quick double pockets without silencing the second drop.
+Sound detection is read-only and does not change any physical simulation.
