@@ -17,5 +17,7 @@ To shoot: place the striker on the lower baseline; touch PULL BACK,
 drag backward to choose direction and power, and lift the same finger.
 Short drags cancel. The menu is isolated from touch-shot handling.
 
-The desktop interface and rules, physics, CPU, sounds, and themes remain
-unchanged.
+The desktop UI now keeps the CARROM title, style caption and mode buttons
+inside its scrollable right panel, allowing a larger board. Mobile keeps its
+existing portrait header, mode switch and hamburger menu. Gameplay, rules,
+physics, CPU, sounds and themes remain unchanged.

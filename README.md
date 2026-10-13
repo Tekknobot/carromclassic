@@ -61,7 +61,7 @@ Physics collision sounds are rate-limited to avoid noisy, constant retriggering 
 
 ## Layout
 
-The full 766px outer frame is reserved separately from the top mode selector and bottom control reminder. The right sidebar contains match status, player/CPU pieces, Queen state, charge bar, CPU difficulty and rules/new-board controls. The sidebar uses vertical scrolling on short windows; no controls overlay the table.
+In landscape/desktop, the entire title, style subtitle, CLASSIC/DUBOO mode switch and controls reminder are in the right sidebar. The board has no floating header or footer: the whole left canvas is used to fit the full 766px frame with small, even gutters. Match details, scores, Queen, charge bar, CPU difficulty, Rules and Restart remain in the scrollable sidebar. In portrait the separate compact top header, mode buttons and hamburger menu are preserved, with the full-width board and the pull-back control below it.
 
 ## Notes
 
@@ -104,4 +104,4 @@ only the power meter and PULL BACK gesture pad remain below it.
 Open the menu to change settings instantly, then tap CLOSE or outside to
 return to the board. Opening the menu safely cancels a partial pull instead
 of firing. The pull-back pad still shoots on finger release with no timer.
-Only the portrait UI changes; desktop retains its original controls.
+Desktop now uses a larger board with all header and mode controls inside the right panel. Input and gameplay mechanics are unchanged in both layouts.

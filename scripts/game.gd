@@ -31,6 +31,8 @@ var duboo_mode := false
 var mode_bar: HBoxContainer
 var classic_button: Button
 var duboo_button: Button
+var desktop_classic_button: Button
+var desktop_duboo_button: Button
 var style_heading: Label
 var style_selector: HBoxContainer
 var rules_body: Label
@@ -356,9 +358,10 @@ func _style_cpu_option(opt: OptionButton, portrait: bool, u: float = 1.0, popup_
 		menu.min_size = Vector2i(popup_width, 0)
 
 func _build_ui() -> void:
+	# The floating identity and mode switch belong to the PHONE only.
+	# Desktop gets its own compact identity in the sidebar, leaving the
+	# entire left canvas free for the board at any landscape aspect ratio.
 	title_label = _label(self, "CARROM", 29, TEXT)
-	board_caption = _label(self, "CLASSIC BOARD  /  SINGLE PLAYER", 12, MUTED)
-	tip_label = _label(self, "MOUSE   PLACE  /  AIM  /  HOLD TO POWER  /  RELEASE", 12, MUTED, true)
 	mode_bar = HBoxContainer.new()
 	mode_bar.add_theme_constant_override("separation", 8)
 	add_child(mode_bar)
@@ -383,6 +386,28 @@ func _build_ui() -> void:
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 10)
 	scroll.add_child(content)
+
+	# Desktop identity + mode selector. Kept inside the *scrolling sidebar*
+	# instead of floating over the playing area. On portrait devices the
+	# original phone title/modes are shown while this whole panel is hidden.
+	var identity := VBoxContainer.new()
+	identity.add_theme_constant_override("separation", 2)
+	content.add_child(identity)
+	var desktop_title := _label(identity, "CARROM", 29, TEXT)
+	desktop_title.custom_minimum_size.y = 39
+	board_caption = _label(identity, "STYLE 01 / 08  /  CLASSIC TOURNAMENT", 11, MUTED, true)
+	board_caption.custom_minimum_size.y = 28
+	var desktop_modes := HBoxContainer.new()
+	desktop_modes.add_theme_constant_override("separation", 8)
+	content.add_child(desktop_modes)
+	desktop_classic_button = _make_button(desktop_modes, "CLASSIC")
+	desktop_duboo_button = _make_button(desktop_modes, "DUBOO")
+	desktop_classic_button.pressed.connect(func() -> void: _set_mode(false))
+	desktop_duboo_button.pressed.connect(func() -> void: _set_mode(true))
+	var header_divider := HSeparator.new()
+	header_divider.add_theme_color_override("color", EDGE_SOFT)
+	content.add_child(header_divider)
+
 	_label(content, "THE MATCH", 12, MINT)
 	match_info = _label(content, "BOARD 1 OF 8   |   FIRST TO 25", 16, TEXT)
 	# A dedicated cosmetic selector: usable during every phase of the match.
@@ -464,7 +489,7 @@ func _build_ui() -> void:
 		_mobile_refresh_menu()
 	)
 	content.add_child(cpu_selector)
-	# One concise controls reminder belongs below the board, not in the sidebar.
+	# Secondary actions stay grouped in the sidebar, never in the board canvas.
 	var bottom_buttons := HBoxContainer.new()
 	bottom_buttons.add_theme_constant_override("separation", 10)
 	content.add_child(bottom_buttons)
@@ -472,6 +497,8 @@ func _build_ui() -> void:
 	rules_button.pressed.connect(_open_rules)
 	restart_button = _make_button(bottom_buttons, "NEW MATCH", false)
 	restart_button.pressed.connect(_new_match)
+	# The control hint also belongs in the sidebar rather than below the board.
+	tip_label = _label(content, "MOUSE  PLACE  /  AIM  /  HOLD TO POWER  /  RELEASE", 11, MUTED, true)
 	_build_rules_overlay()
 
 func _mobile_label(parent: Node, value: String, font_size: int, color: Color) -> Label:
@@ -889,9 +916,10 @@ func _refresh_mode_ui() -> void:
 	if board == null or classic_button == null:
 		return
 	board.duboo_mode = duboo_mode
-	for b in [classic_button, duboo_button]:
-		var selected = (b == duboo_button) if duboo_mode else (b == classic_button)
-		if portrait_touch:
+	# Both layouts share the same game mode, despite using separate controls.
+	for b in [classic_button, duboo_button, desktop_classic_button, desktop_duboo_button]:
+		var selected = (b == duboo_button or b == desktop_duboo_button) if duboo_mode else (b == classic_button or b == desktop_classic_button)
+		if portrait_touch and (b == classic_button or b == duboo_button):
 			_mobile_button_skin(b, selected, mobile_mobile_scale)
 		else:
 			_apply_button_skin(b, selected)
@@ -935,41 +963,31 @@ func _layout() -> void:
 		mobile_node.visible = false
 	mobile_menu_scrim.hide()
 	mobile_menu_panel.hide()
-	mode_bar.add_theme_constant_override("separation", 8)
-	classic_button.add_theme_font_size_override("font_size", 15)
-	duboo_button.add_theme_font_size_override("font_size", 15)
-	_style_cpu_option(cpu_selector, false)
+	# No title, buttons or instruction strip hover over the board on desktop.
+	title_label.visible = false
+	mode_bar.visible = false
 	side_panel.visible = true
 	board_caption.visible = true
 	tip_label.visible = true
-	var side_w := minf(clampf(sz.x * 0.315, 332.0, 452.0), maxf(280.0, sz.x * 0.42))
-	var side_x := sz.x - side_w - 20.0
-	var board_w := maxf(260.0, side_x - 18.0)
-	# Layout includes the FULL 766 px wooden/marble frame (-43 to 723),
-	# never just the 680 px playing field. Keep a real top and bottom gutter.
-	var top_guard := 145.0
-	var bottom_guard := sz.y - 50.0
-	var allowed_h := maxf(220.0, bottom_guard - top_guard)
-	var allowed_w := maxf(230.0, board_w - 28.0)
-	var scale_value := maxf(0.25, minf(1.15, minf(allowed_w / 766.0, allowed_h / 766.0)))
+	_style_cpu_option(cpu_selector, false)
+	# A slim, readable sidebar reserves the right side. The board uses ALL
+	# available height and width on the left, with a consistent quiet gutter.
+	var gutter := clampf(minf(sz.x, sz.y) * 0.02, 12.0, 24.0)
+	var between := clampf(sz.x * 0.016, 14.0, 26.0)
+	var side_w := minf(clampf(sz.x * 0.29, 322.0, 426.0), maxf(280.0, sz.x * 0.42))
+	var side_x := sz.x - side_w - gutter
+	var left_space := maxf(250.0, side_x - between - gutter)
+	# 766 is the size of the entire drawn frame, not just its playing surface.
+	var board_diameter := minf(left_space, maxf(240.0, sz.y - gutter * 2.0))
+	var scale_value := maxf(0.25, minf(1.6, board_diameter / 766.0))
+	var drawn_size := 766.0 * scale_value
+	var board_left := gutter + (left_space - drawn_size) * 0.5
+	var board_top := (sz.y - drawn_size) * 0.5
 	board.scale = Vector2.ONE * scale_value
-	var board_top := top_guard + (allowed_h - 766.0 * scale_value) * 0.5
-	var board_left := (board_w - 766.0 * scale_value) * 0.5
 	board.position = Vector2(board_left + 43.0 * scale_value, board_top + 43.0 * scale_value)
-	side_panel.position = Vector2(side_x, 18.0)
-	side_panel.size = Vector2(side_w, maxf(170.0, sz.y - 36.0))
+	side_panel.position = Vector2(side_x, gutter)
+	side_panel.size = Vector2(side_w, maxf(170.0, sz.y - 2.0 * gutter))
 	cpu_selector.get_popup().min_size = Vector2i(maxi(200, int(side_w - 66.0)), 0)
-	title_label.add_theme_font_size_override("font_size", 29)
-	title_label.position = Vector2(26.0, 9.0)
-	title_label.size = Vector2(board_w - 46.0, 40.0)
-	board_caption.position = Vector2(27.0, 48.0)
-	board_caption.size = Vector2(board_w - 45.0, 20.0)
-	mode_bar.position = Vector2(27.0, 84.0)
-	mode_bar.size = Vector2(minf(335.0, board_w - 46.0), 43.0)
-	classic_button.custom_minimum_size = Vector2(0, 41)
-	duboo_button.custom_minimum_size = Vector2(0, 41)
-	tip_label.position = Vector2(27.0, sz.y - 35.0)
-	tip_label.size = Vector2(board_w - 45.0, 29.0)
 	var dialog_size := Vector2(minf(640.0, sz.x - 65.0), minf(740.0, sz.y - 42.0))
 	rules_overlay.position = (sz - dialog_size) * 0.5
 	rules_overlay.size = dialog_size
@@ -977,6 +995,8 @@ func _layout() -> void:
 func _layout_portrait(sz: Vector2) -> void:
 	# The board and score are always visible; ALL secondary controls live in
 	# the hamburger menu. Only the power display and pull pad sit below the board.
+	title_label.visible = true
+	mode_bar.visible = true
 	side_panel.visible = false
 	board_caption.visible = false
 	tip_label.visible = false
