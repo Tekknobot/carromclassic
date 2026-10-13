@@ -59,6 +59,7 @@ var board_finished_message := ""
 var status_title := "YOUR BREAK"
 var status_text := "Move over the bottom baseline and click to place your striker."
 var side_panel: PanelContainer
+var stats_panel: PanelContainer
 var main_score_white: Label
 var main_score_black: Label
 var coins_white: Label
@@ -357,10 +358,62 @@ func _style_cpu_option(opt: OptionButton, portrait: bool, u: float = 1.0, popup_
 	if popup_width > 0:
 		menu.min_size = Vector2i(popup_width, 0)
 
+func _sidebar_panel() -> VBoxContainer:
+	# Both landscape docks share the same visual language and scroll
+	# independently when the browser has a shorter viewport.
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", _style(PANEL, EDGE_SOFT, 14))
+	add_child(panel)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(scroll)
+	var content := VBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.add_theme_constant_override("separation", 11)
+	scroll.add_child(content)
+	# The owner references are established here so the content builder
+	# can use the same factory for both independent docks.
+	if stats_panel == null:
+		stats_panel = panel
+	else:
+		side_panel = panel
+	return content
+
+func _sidebar_rule(parent: Node) -> void:
+	var rule := HSeparator.new()
+	rule.add_theme_color_override("color", EDGE_SOFT)
+	parent.add_child(rule)
+
+func _stat_row(parent: Node, heading: String, accent: Color) -> Array[Label]:
+	# A compact horizontal score row remains legible in a narrow left dock.
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", _style(PANEL_ALT, EDGE_SOFT, 11))
+	parent.add_child(card)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 5)
+	card.add_child(row)
+	var meta := VBoxContainer.new()
+	meta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	meta.add_theme_constant_override("separation", 3)
+	row.add_child(meta)
+	_label(meta, heading, 11, accent)
+	var coins := _label(meta, "0 / 9 pocketed", 11, MUTED)
+	var score := _label(row, "0", 29, TEXT)
+	score.size_flags_horizontal = Control.SIZE_SHRINK_END
+	score.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	score.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return [score, coins]
+
 func _build_ui() -> void:
-	# The floating identity and mode switch belong to the PHONE only.
-	# Desktop gets its own compact identity in the sidebar, leaving the
-	# entire left canvas free for the board at any landscape aspect ratio.
+	# Portrait keeps its familiar header and own mobile menu. These two
+	# new docks are only displayed on landscape / desktop viewports.
 	title_label = _label(self, "CARROM", 29, TEXT)
 	mode_bar = HBoxContainer.new()
 	mode_bar.add_theme_constant_override("separation", 8)
@@ -369,116 +422,101 @@ func _build_ui() -> void:
 	duboo_button = _make_button(mode_bar, "DUBOO")
 	classic_button.pressed.connect(func() -> void: _set_mode(false))
 	duboo_button.pressed.connect(func() -> void: _set_mode(true))
-	side_panel = PanelContainer.new()
-	side_panel.add_theme_stylebox_override("panel", _style(PANEL, EDGE_SOFT, 14))
-	add_child(side_panel)
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 13)
-	margin.add_theme_constant_override("margin_right", 13)
-	margin.add_theme_constant_override("margin_top", 11)
-	margin.add_theme_constant_override("margin_bottom", 11)
-	side_panel.add_child(margin)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	margin.add_child(scroll)
-	var content := VBoxContainer.new()
-	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 10)
-	scroll.add_child(content)
 
-	# Desktop identity + mode selector. Kept inside the *scrolling sidebar*
-	# instead of floating over the playing area. On portrait devices the
-	# original phone title/modes are shown while this whole panel is hidden.
-	var identity := VBoxContainer.new()
-	identity.add_theme_constant_override("separation", 2)
-	content.add_child(identity)
-	var desktop_title := _label(identity, "CARROM", 29, TEXT)
-	desktop_title.custom_minimum_size.y = 39
-	board_caption = _label(identity, "STYLE 01 / 08  /  CLASSIC TOURNAMENT", 11, MUTED, true)
-	board_caption.custom_minimum_size.y = 28
-	var desktop_modes := HBoxContainer.new()
-	desktop_modes.add_theme_constant_override("separation", 8)
-	content.add_child(desktop_modes)
-	desktop_classic_button = _make_button(desktop_modes, "CLASSIC")
-	desktop_duboo_button = _make_button(desktop_modes, "DUBOO")
-	desktop_classic_button.pressed.connect(func() -> void: _set_mode(false))
-	desktop_duboo_button.pressed.connect(func() -> void: _set_mode(true))
-	var header_divider := HSeparator.new()
-	header_divider.add_theme_color_override("color", EDGE_SOFT)
-	content.add_child(header_divider)
-
-	_label(content, "THE MATCH", 12, MINT)
-	match_info = _label(content, "BOARD 1 OF 8   |   FIRST TO 25", 16, TEXT)
-	# A dedicated cosmetic selector: usable during every phase of the match.
-	# "NEXT" wraps from theme 8 back to the untouched original theme 1.
-	style_heading = _label(content, "BOARD APPEARANCE", 12, MINT)
-	var board_style_row := HBoxContainer.new()
-	style_selector = board_style_row
-	board_style_row.add_theme_constant_override("separation", 7)
-	content.add_child(board_style_row)
-	board_style_prev = _make_button(board_style_row, "PREV")
-	board_style_prev.custom_minimum_size.x = 58
-	board_style_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	board_style_prev.pressed.connect(func() -> void: _cycle_board_style(-1))
-	board_style_label = _label(board_style_row, "01 / 08   CLASSIC TOURNAMENT", 13, TEXT, true)
-	board_style_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	board_style_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	board_style_label.custom_minimum_size.y = 45
-	board_style_next = _make_button(board_style_row, "NEXT", true)
-	board_style_next.custom_minimum_size.x = 58
-	board_style_next.size_flags_horizontal = Control.SIZE_SHRINK_END
-	board_style_next.pressed.connect(func() -> void: _cycle_board_style(1))
-	var scores := HBoxContainer.new()
-	scores.add_theme_constant_override("separation", 10)
-	content.add_child(scores)
-	var white_card := _score_card(scores, "YOU   /   WHITE", MINT)
+	# LEFT: Read-only live match information and feedback. No appearance
+	# or game-mode actions compete visually with the current score.
+	var stats := _sidebar_panel()
+	_label(stats, "GAME STATS", 12, MINT)
+	_sidebar_rule(stats)
+	_label(stats, "THE MATCH", 11, MUTED)
+	match_info = _label(stats, "BOARD 1 OF 8  /  FIRST TO 25", 14, TEXT, true)
+	match_info.custom_minimum_size.y = 38
+	var scoreboard := VBoxContainer.new()
+	scoreboard.add_theme_constant_override("separation", 8)
+	stats.add_child(scoreboard)
+	var white_card := _stat_row(scoreboard, "YOU / WHITE", MINT)
 	main_score_white = white_card[0]
 	coins_white = white_card[1]
-	var black_card := _score_card(scores, "CPU   /   BLACK", GOLD)
+	var black_card := _stat_row(scoreboard, "CPU / BLACK", GOLD)
 	main_score_black = black_card[0]
 	coins_black = black_card[1]
 	var queens := PanelContainer.new()
 	queens.add_theme_stylebox_override("panel", _style(PANEL_ALT, EDGE_SOFT, 11))
-	content.add_child(queens)
+	stats.add_child(queens)
 	var queen_row := HBoxContainer.new()
+	queen_row.add_theme_constant_override("separation", 3)
 	queens.add_child(queen_row)
 	var queen_dot := Label.new()
 	queen_dot.text = "Q"
-	queen_dot.add_theme_font_size_override("font_size", 22)
+	queen_dot.add_theme_font_size_override("font_size", 20)
 	queen_dot.add_theme_color_override("font_color", Color("#e45f62"))
 	queen_row.add_child(queen_dot)
-	queen_text = _label(queen_row, "  QUEEN  /  ON THE BOARD", 13, TEXT)
+	queen_text = _label(queen_row, "QUEEN / ON THE BOARD", 11, TEXT, true)
+	queen_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_sidebar_rule(stats)
+	_label(stats, "CURRENT TURN", 11, MUTED)
 	var turn_card := PanelContainer.new()
 	turn_card.add_theme_stylebox_override("panel", _style(Color("#25483f"), EDGE, 11))
-	content.add_child(turn_card)
+	stats.add_child(turn_card)
 	var turn_stack := VBoxContainer.new()
 	turn_stack.add_theme_constant_override("separation", 6)
 	turn_card.add_child(turn_stack)
-	turn_head = _label(turn_stack, "YOUR BREAK", 18, MINT)
-	turn_desc = _label(turn_stack, "Click the bottom baseline to place.", 14, TEXT, true)
-	turn_desc.custom_minimum_size.y = 60
+	turn_head = _label(turn_stack, "YOUR BREAK", 17, MINT)
+	turn_desc = _label(turn_stack, "Click the bottom baseline to place.", 12, TEXT, true)
+	turn_desc.custom_minimum_size.y = 56
 	var power_box := VBoxContainer.new()
-	power_box.add_theme_constant_override("separation", 5)
-	content.add_child(power_box)
-	power_label = _label(power_box, "SHOT POWER   0%", 12, MUTED)
+	power_box.add_theme_constant_override("separation", 6)
+	stats.add_child(power_box)
+	power_label = _label(power_box, "SHOT POWER", 11, MUTED, true)
 	power_meter = ProgressBar.new()
 	power_meter.show_percentage = false
 	power_meter.min_value = 0
 	power_meter.max_value = 100
-	power_meter.custom_minimum_size.y = 11
+	power_meter.custom_minimum_size.y = 10
 	power_meter.add_theme_stylebox_override("background", _style(Color("#0e2623"), Color.TRANSPARENT, 6))
 	power_meter.add_theme_stylebox_override("fill", _style(MINT, Color.TRANSPARENT, 6))
 	power_box.add_child(power_meter)
-	next_button = _make_button(content, "NEXT BOARD", true)
+	next_button = _make_button(stats, "NEXT BOARD", true)
 	next_button.pressed.connect(_next_board)
 	next_button.visible = false
-	var divider := HSeparator.new()
-	divider.add_theme_color_override("color", Color("#537167"))
-	content.add_child(divider)
-	_label(content, "CPU OPPONENT", 11, MINT)
+
+	# RIGHT: Identity, game mode and all adjustable information/actions.
+	var info := _sidebar_panel()
+	var identity := VBoxContainer.new()
+	identity.add_theme_constant_override("separation", 3)
+	info.add_child(identity)
+	var desktop_title := _label(identity, "CARROM", 27, TEXT)
+	desktop_title.custom_minimum_size.y = 36
+	board_caption = _label(identity, "STYLE 01 / 08  /  CLASSIC TOURNAMENT", 11, MUTED, true)
+	board_caption.custom_minimum_size.y = 31
+	_sidebar_rule(info)
+	_label(info, "GAME MODE", 11, MINT)
+	var desktop_modes := HBoxContainer.new()
+	desktop_modes.add_theme_constant_override("separation", 8)
+	info.add_child(desktop_modes)
+	desktop_classic_button = _make_button(desktop_modes, "CLASSIC")
+	desktop_duboo_button = _make_button(desktop_modes, "DUBOO")
+	desktop_classic_button.pressed.connect(func() -> void: _set_mode(false))
+	desktop_duboo_button.pressed.connect(func() -> void: _set_mode(true))
+	_sidebar_rule(info)
+	style_heading = _label(info, "BOARD APPEARANCE", 11, MINT)
+	# The style name has its own full-width row: long theme names are
+	# readable even if the browser is resized to a compact landscape size.
+	board_style_label = _label(info, "01 / 08  CLASSIC TOURNAMENT", 13, TEXT, true)
+	board_style_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	board_style_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	board_style_label.custom_minimum_size.y = 39
+	style_selector = HBoxContainer.new()
+	style_selector.add_theme_constant_override("separation", 8)
+	info.add_child(style_selector)
+	board_style_prev = _make_button(style_selector, "PREV")
+	board_style_prev.pressed.connect(func() -> void: _cycle_board_style(-1))
+	board_style_next = _make_button(style_selector, "NEXT", true)
+	board_style_next.pressed.connect(func() -> void: _cycle_board_style(1))
+	_sidebar_rule(info)
+	_label(info, "CPU DIFFICULTY", 11, MINT)
 	cpu_selector = OptionButton.new()
-	cpu_selector.custom_minimum_size.y = 38
+	cpu_selector.custom_minimum_size.y = 40
 	cpu_selector.add_item("Casual", 0)
 	cpu_selector.add_item("Standard", 1)
 	cpu_selector.add_item("Expert", 2)
@@ -488,17 +526,17 @@ func _build_ui() -> void:
 		cpu_skill = idx
 		_mobile_refresh_menu()
 	)
-	content.add_child(cpu_selector)
-	# Secondary actions stay grouped in the sidebar, never in the board canvas.
+	info.add_child(cpu_selector)
+	_sidebar_rule(info)
+	_label(info, "GAME INFO", 11, MINT)
+	tip_label = _label(info, "MOUSE: PLACE / AIM / HOLD TO POWER / RELEASE", 11, MUTED, true)
 	var bottom_buttons := HBoxContainer.new()
-	bottom_buttons.add_theme_constant_override("separation", 10)
-	content.add_child(bottom_buttons)
-	var rules_button := _make_button(bottom_buttons, "RULES", false)
+	bottom_buttons.add_theme_constant_override("separation", 8)
+	info.add_child(bottom_buttons)
+	var rules_button := _make_button(bottom_buttons, "RULES")
 	rules_button.pressed.connect(_open_rules)
-	restart_button = _make_button(bottom_buttons, "NEW MATCH", false)
+	restart_button = _make_button(bottom_buttons, "NEW MATCH")
 	restart_button.pressed.connect(_new_match)
-	# The control hint also belongs in the sidebar rather than below the board.
-	tip_label = _label(content, "MOUSE  PLACE  /  AIM  /  HOLD TO POWER  /  RELEASE", 11, MUTED, true)
 	_build_rules_overlay()
 
 func _mobile_label(parent: Node, value: String, font_size: int, color: Color) -> Label:
@@ -946,7 +984,7 @@ func _shot_speed_max() -> float:
 	return DUBOO_MAX_SHOT_SPEED if duboo_mode else MAX_SHOT_SPEED
 
 func _layout() -> void:
-	if board == null or side_panel == null:
+	if board == null or side_panel == null or stats_panel == null:
 		return
 	var sz := size
 	var should_portrait := sz.y > sz.x * 1.06
@@ -963,31 +1001,35 @@ func _layout() -> void:
 		mobile_node.visible = false
 	mobile_menu_scrim.hide()
 	mobile_menu_panel.hide()
-	# No title, buttons or instruction strip hover over the board on desktop.
 	title_label.visible = false
 	mode_bar.visible = false
+	stats_panel.visible = true
 	side_panel.visible = true
 	board_caption.visible = true
 	tip_label.visible = true
 	_style_cpu_option(cpu_selector, false)
-	# A slim, readable sidebar reserves the right side. The board uses ALL
-	# available height and width on the left, with a consistent quiet gutter.
-	var gutter := clampf(minf(sz.x, sz.y) * 0.02, 12.0, 24.0)
-	var between := clampf(sz.x * 0.016, 14.0, 26.0)
-	var side_w := minf(clampf(sz.x * 0.29, 322.0, 426.0), maxf(280.0, sz.x * 0.42))
-	var side_x := sz.x - side_w - gutter
-	var left_space := maxf(250.0, side_x - between - gutter)
-	# 766 is the size of the entire drawn frame, not just its playing surface.
-	var board_diameter := minf(left_space, maxf(240.0, sz.y - gutter * 2.0))
-	var scale_value := maxf(0.25, minf(1.6, board_diameter / 766.0))
+	# Match statistics flank the LEFT edge; identity and game information
+	# occupy the RIGHT edge, with the board centered in the clear middle lane.
+	# Keep both docks compact so that neither steals excessive board space.
+	var gutter := clampf(minf(sz.x, sz.y) * 0.018, 10.0, 21.0)
+	var between := clampf(sz.x * 0.012, 10.0, 22.0)
+	var stats_w := clampf(sz.x * 0.168, 174.0, 278.0)
+	var info_w := clampf(sz.x * 0.19, 198.0, 310.0)
+	var center_space := maxf(150.0, sz.x - 2.0 * gutter - 2.0 * between - stats_w - info_w)
+	# Preserve board scale as the highest priority in shorter viewports.
+	var board_diameter := minf(center_space, maxf(220.0, sz.y - 2.0 * gutter))
+	var scale_value := maxf(0.20, minf(1.6, board_diameter / 766.0))
 	var drawn_size := 766.0 * scale_value
-	var board_left := gutter + (left_space - drawn_size) * 0.5
+	var board_lane_x := gutter + stats_w + between
+	var board_left := board_lane_x + (center_space - drawn_size) * 0.5
 	var board_top := (sz.y - drawn_size) * 0.5
 	board.scale = Vector2.ONE * scale_value
 	board.position = Vector2(board_left + 43.0 * scale_value, board_top + 43.0 * scale_value)
-	side_panel.position = Vector2(side_x, gutter)
-	side_panel.size = Vector2(side_w, maxf(170.0, sz.y - 2.0 * gutter))
-	cpu_selector.get_popup().min_size = Vector2i(maxi(200, int(side_w - 66.0)), 0)
+	stats_panel.position = Vector2(gutter, gutter)
+	stats_panel.size = Vector2(stats_w, maxf(170.0, sz.y - 2.0 * gutter))
+	side_panel.position = Vector2(sz.x - info_w - gutter, gutter)
+	side_panel.size = Vector2(info_w, maxf(170.0, sz.y - 2.0 * gutter))
+	cpu_selector.get_popup().min_size = Vector2i(maxi(176, int(info_w - 44.0)), 0)
 	var dialog_size := Vector2(minf(640.0, sz.x - 65.0), minf(740.0, sz.y - 42.0))
 	rules_overlay.position = (sz - dialog_size) * 0.5
 	rules_overlay.size = dialog_size
@@ -998,6 +1040,7 @@ func _layout_portrait(sz: Vector2) -> void:
 	title_label.visible = true
 	mode_bar.visible = true
 	side_panel.visible = false
+	stats_panel.visible = false
 	board_caption.visible = false
 	tip_label.visible = false
 	for node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_match_label, mobile_menu_button]:
