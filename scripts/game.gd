@@ -26,6 +26,8 @@ const MIN_SHOT_SPEED := 320.0
 const MAX_SHOT_SPEED := 1425.0
 const DUBOO_MIN_SHOT_SPEED := 250.0
 const DUBOO_MAX_SHOT_SPEED := 1080.0
+# Desktop stats dock width is independent of labels, scores, and window changes.
+const DESKTOP_STATS_WIDTH := 244.0
 
 var duboo_mode := false
 var mode_bar: HBoxContainer
@@ -64,8 +66,8 @@ var winner := -1
 var board_finished_message := ""
 var status_title := "YOUR BREAK"
 var status_text := "Move over the bottom baseline and click to place your striker."
-var side_panel: PanelContainer
-var stats_panel: PanelContainer
+var side_panel: Panel
+var stats_panel: Panel
 var main_score_white: Label
 var main_score_black: Label
 var coins_white: Label
@@ -365,19 +367,27 @@ func _style_cpu_option(opt: OptionButton, portrait: bool, u: float = 1.0, popup_
 		menu.min_size = Vector2i(popup_width, 0)
 
 func _sidebar_panel() -> VBoxContainer:
-	# Both landscape docks share the same visual language and scroll
-	# independently when the browser has a shorter viewport.
-	var panel := PanelContainer.new()
+	# Panel (not PanelContainer) has no content-driven minimum width.
+	# Its exact width is assigned only by _layout(), so even arbitrarily long
+	# CPU status text can NEVER widen it or push over the board.
+	var panel := Panel.new()
 	panel.add_theme_stylebox_override("panel", _style(PANEL, EDGE_SOFT, 14))
+	panel.clip_contents = true
 	add_child(panel)
+	# An anchored content region follows the panel's bounds but cannot resize
+	# the panel. This also preserves scrolling on short browser windows.
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_bottom", 12)
 	panel.add_child(margin)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_top", 22)
+	margin.add_theme_constant_override("margin_bottom", 22)
 	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# Keep any unexpectedly long strings inside the clipped dock rather than
+	# allowing the ScrollContainer's child minimum width to alter its parent.
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(scroll)
 	var content := VBoxContainer.new()
@@ -467,7 +477,8 @@ func _build_ui() -> void:
 	var turn_stack := VBoxContainer.new()
 	turn_stack.add_theme_constant_override("separation", 6)
 	turn_card.add_child(turn_stack)
-	turn_head = _label(turn_stack, "YOUR BREAK", 17, MINT)
+	turn_head = _label(turn_stack, "YOUR BREAK", 17, MINT, true)
+	turn_head.clip_text = true
 	turn_desc = _label(turn_stack, "Click the bottom baseline to place.", 12, TEXT, true)
 	turn_desc.custom_minimum_size.y = 56
 	var power_box := VBoxContainer.new()
@@ -1014,17 +1025,17 @@ func _layout() -> void:
 	board_caption.visible = true
 	tip_label.visible = true
 	_style_cpu_option(cpu_selector, false)
-	# Match statistics flank the LEFT edge; identity and game information
-	# occupy the RIGHT edge, with the board centered in the clear middle lane.
-	# Keep both docks compact so that neither steals excessive board space.
+	# The left dock is ALWAYS 244 px in landscape, regardless of text and
+	# score updates. Both panels own separate, non-overlapping lanes.
 	var gutter := clampf(minf(sz.x, sz.y) * 0.018, 10.0, 21.0)
 	var between := clampf(sz.x * 0.012, 10.0, 22.0)
-	var stats_w := clampf(sz.x * 0.168, 174.0, 278.0)
+	var stats_w := DESKTOP_STATS_WIDTH
 	var info_w := clampf(sz.x * 0.19, 198.0, 310.0)
-	var center_space := maxf(150.0, sz.x - 2.0 * gutter - 2.0 * between - stats_w - info_w)
-	# Preserve board scale as the highest priority in shorter viewports.
-	var board_diameter := minf(center_space, maxf(220.0, sz.y - 2.0 * gutter))
-	var scale_value := maxf(0.20, minf(1.6, board_diameter / 766.0))
+	# Never impose an artificial minimum board size; it caused earlier panel
+	# overlap when there wasn't actually enough center space to draw it.
+	var center_space := maxf(0.0, sz.x - 2.0 * gutter - 2.0 * between - stats_w - info_w)
+	var board_diameter := minf(center_space, maxf(0.0, sz.y - 2.0 * gutter))
+	var scale_value := minf(1.6, board_diameter / 766.0)
 	var drawn_size := 766.0 * scale_value
 	var board_lane_x := gutter + stats_w + between
 	var board_left := board_lane_x + (center_space - drawn_size) * 0.5

@@ -1,11 +1,11 @@
-CARROM - Fixed Width Left Stats Panel
+CARROM - fixed width stats dock (October 2026)
 
-- Desktop GAME STATS panel stays 244 px wide even when match/status text changes.
-- Left and right panels contain their scrollable content in clipping hosts that
-  isolate the panel's minimum size from variable-width labels.
-- Long CPU status headings wrap rather than pushing into the board.
-- Board diameter is based on the actual clear lane with a small safety gap,
-  rather than enforcing an overlapping minimum width at narrow window sizes.
-- All three CPU difficulty levels, game rules, modes, and physics are unchanged.
+- Desktop left GAME STATS dock is exactly 244 px wide, independent of live text, match state, or viewport width.
+- Uses an ordinary Panel instead of a PanelContainer, breaking Godot's automatic child minimum-size feedback that previously caused expansion.
+- Anchored, clipped interior retains vertical scrolling and wraps long turn headings.
+- Both desktop sidebars are bounded independently from the board.
+- The board uses only the remaining center lane, with no artificial minimum size that would cause overlap.
+- The three refined CPU difficulty tiers, 1 px markings, Carrom, Duboo, physics, and mobile controls are preserved.
 
-Patch source: user-supplied scripts/game.gd; packaged atop carrom_cpu_refined.zip.
+Changed file: scripts/game.gd.
+Runtime Godot validation was not available here.
