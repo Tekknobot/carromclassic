@@ -383,16 +383,17 @@ func _draw_discs() -> void:
 			ornament = Color("#28897e")
 		if duboo_mode:
 			if kind == "striker":
-				# Thick, TRANSPARENT, open-centred magenta acrylic sliding ring,
-				# not an ivory solid striker with circles painted on its face.
-				var mid := (rad + CarromPhysics.DUBOO_RING_INNER_RADIUS) * 0.5
-				var band := rad - CarromPhysics.DUBOO_RING_INNER_RADIUS
-				draw_arc(pos + Vector2(1.3, 2.2), mid, 0, TAU, 96, Color(0.0, 0.0, 0.0, 0.34), band + 2.7, true)
-				draw_arc(pos, mid, 0, TAU, 96, Color("#5a284b"), band + 0.9, true)
-				draw_arc(pos, mid, 0, TAU, 96, Color("#be61a7", 0.94), band - 1.3, true)
-				draw_arc(pos, rad - 1.3, 0, TAU, 96, Color("#f5c1e5", 0.85), 1.6, true)
-				draw_arc(pos, CarromPhysics.DUBOO_RING_INNER_RADIUS + 0.8, 0, TAU, 96, Color("#f4d6e8", 0.84), 1.5, true)
-				draw_arc(pos, mid, -PI * 0.75, -PI * 0.15, 40, Color("#fff5fa", 0.50), 2.1, true)
+				# Traditional ivory Duboo striker with a large hollow centre.
+				# Dark outer rim, ivory body and subtle concentric detailing.
+				var inner := CarromPhysics.DUBOO_RING_INNER_RADIUS
+				var mid := (rad + inner) * 0.5
+				var band := rad - inner
+				draw_arc(pos + Vector2(1.5, 2.0), mid, 0, TAU, 96, Color(0, 0, 0, 0.25), band + 2.0, true)
+				draw_arc(pos, mid, 0, TAU, 96, Color("#514C43"), band + 0.5, true)
+				draw_arc(pos, mid, 0, TAU, 96, Color("#F2E6CC"), band - 2.5, true)
+				draw_arc(pos, rad - 1.8, 0, TAU, 96, Color("#9A8568"), 1.8, true)
+				draw_arc(pos, inner + 1.8, 0, TAU, 96, Color("#B7A184"), 1.6, true)
+				draw_arc(pos, mid, -PI * 0.75, -PI * 0.15, 40, Color("#FFFFFF", 0.35), 2.0, true)
 				continue
 			# Small polished white / dark / red counters against the dark stone.
 			if kind == "white":
