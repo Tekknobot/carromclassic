@@ -54,6 +54,12 @@ var aim_direction := Vector2.UP
 var cpu_time := 0.0
 var cpu_queued_shot: Dictionary = {}
 var cpu_skill := 1
+# Per-turn incremental physics search. Each difficulty gets its own budget.
+var cpu_plan_candidates: Array[Dictionary] = []
+var cpu_plan_ranked: Array[Dictionary] = []
+var cpu_plan_cursor := 0
+var cpu_plan_active := false
+var cpu_plan_base_value := 0.0
 var winner := -1
 var board_finished_message := ""
 var status_title := "YOUR BREAK"
@@ -829,7 +835,7 @@ func _mobile_sync() -> void:
 		mobile_status_hint.text = "RELEASE TO SHOOT"
 	elif phase == "moving":
 		mobile_status_hint.text = "WAIT FOR PIECES TO STOP"
-	elif phase in ["cpu_aim", "cpu_think"]:
+	elif phase in ["cpu_aim", "cpu_think", "cpu_search"]:
 		mobile_status_hint.text = "OPPONENT PLAYING"
 	elif phase == "board_over":
 		mobile_status_hint.text = "OPEN MENU TO CONTINUE"
@@ -1265,6 +1271,9 @@ func _new_match() -> void:
 	_begin_board()
 
 func _begin_board() -> void:
+	cpu_plan_active = false
+	cpu_plan_candidates.clear()
+	cpu_plan_ranked.clear()
 	discs.clear()
 	queen_owner = -1
 	pending_queen = -1
@@ -1669,18 +1678,12 @@ func _process(delta: float) -> void:
 	elif phase == "cpu_think":
 		cpu_time -= delta
 		if cpu_time <= 0.0:
-			cpu_queued_shot = _choose_cpu_shot()
-			_place_striker(1, cpu_queued_shot["x"])
-			board.aim_direction = cpu_queued_shot["dir"]
-			board.aim_power = inverse_lerp(_shot_speed_min(), _shot_speed_max(), cpu_queued_shot["speed"])
-			board.show_aim = true
-			board.show_cpu_target = true
-			board.cpu_target = cpu_queued_shot["target"]
-			board.queue_redraw()
-			phase = "cpu_aim"
-			cpu_time = 0.65
-			_set_status("CPU AIMING", "The computer has selected a shot.")
-			_refresh_ui()
+			_cpu_start_search()
+			phase = "cpu_search"
+			_set_status("CPU STUDYING BOARD", "The computer is considering its options.")
+	elif phase == "cpu_search":
+		if cpu_plan_active:
+			_cpu_search_frame()
 	elif phase == "cpu_aim":
 		cpu_time -= delta
 		if cpu_time <= 0.0:
@@ -1913,99 +1916,328 @@ func _open_rules() -> void:
 	_mobile_sync()
 	sound_click.play()
 
-# The CPU searches for feasible contact points that send one of its discs
-# toward a pocket. It tests baseline positions, collision normals, clear
-# approach lines, and target-to-pocket obstruction. This uses the same
-# physics and power range as the human (it does not teleport pieces).
-func _choose_cpu_shot() -> Dictionary:
-	var best_score := -1.0e10
-	var best := {"x": 340.0, "dir": Vector2.DOWN, "speed": 850.0 if duboo_mode else 1000.0, "target": Vector2(340, 340)}
-	var pockets: Array[Vector2] = PHYSICS.POCKETS
-	for piece in discs:
-		if piece["pocketed"]:
-			continue
-		if piece["kind"] != "black" and not (piece["kind"] == "queen" and queen_owner == -1 and pending_queen == -1 and _pocketed_count("black") > 0):
-			continue
-		var target: Vector2 = piece["pos"]
-		for pocket in pockets:
-			var exit_dir: Vector2 = (pocket - target).normalized()
-			var ghost: Vector2 = target - exit_dir * (PHYSICS.radius_for("striker", duboo_mode) + piece["radius"] + 0.7)
-			var pocket_open := _segment_is_clear(target, pocket, piece["radius"] * 1.9, piece["id"])
-			for n in range(16):
-				var x := (114.0 + float(n) * 30.0) if duboo_mode else (127.0 + float(n) * 28.3)
-				var initial := Vector2(x, CarromBoard.base_y(1, duboo_mode))
-				if not _can_place_striker(initial):
-					continue
-				var offset := ghost - initial
-				if offset.length() < 27.0:
-					continue
-				var direction: Vector2 = offset.normalized()
-				var center_line: Vector2 = target - initial
-				var projection := center_line.dot(direction)
-				if projection <= 0.0:
-					continue
-				var closest_sq := center_line.length_squared() - projection * projection
-				var contact_radius: float = PHYSICS.radius_for("striker", duboo_mode) + piece["radius"]
-				if closest_sq > contact_radius * contact_radius:
-					continue
-				var hit_distance: float = projection - sqrt(maxf(0.0, contact_radius * contact_radius - closest_sq))
-				if hit_distance < 10.0:
-					continue
-				var impact: Vector2 = initial + direction * hit_distance
-				var impact_normal: Vector2 = (target - impact).normalized()
-				var accuracy: float = impact_normal.dot(exit_dir)
-				if accuracy < 0.82:
-					continue
-				var approach_open := _segment_is_clear(initial, impact, PHYSICS.radius_for("striker", duboo_mode) + PHYSICS.radius_for("white", duboo_mode) + 1.0, piece["id"])
-				if not approach_open:
-					continue
-				var travel: float = initial.distance_to(target) + target.distance_to(pocket)
-				var score: float = accuracy * 17.0 + (9.0 if pocket_open else -11.0) - travel * 0.006
-				if piece["kind"] == "queen":
-					score += 1.0 if _pocketed_count("black") > 1 else -4.5
-				# A clean, shorter route is preferable to a long, speculative shot.
-				if score > best_score:
-					best_score = score
-					var speed: float = clampf(350.0 + initial.distance_to(target) * 0.45 + target.distance_to(pocket) * 0.28, 430.0, 990.0) if duboo_mode else clampf(450.0 + initial.distance_to(target) * 0.72 + target.distance_to(pocket) * 0.45, 550.0, 1300.0)
-					best = {"x": x, "dir": direction, "speed": speed, "target": target}
-	# If no direct pocket is available, play a controlled contact/break shot.
-	if best_score < -1.0e8:
-		var best_fallback := 1.0e8
-		for piece in discs:
-			if piece["pocketed"] or piece["kind"] != "black":
-				continue
-			for n in range(12):
-				var x := (112.0 + float(n) * 41.0) if duboo_mode else (130.0 + float(n) * 38.0)
-				var initial := Vector2(x, CarromBoard.base_y(1, duboo_mode))
-				if not _can_place_striker(initial):
-					continue
-				var target: Vector2 = piece["pos"]
-				var delta: Vector2 = target - initial
-				if delta.length_squared() < 10.0:
-					continue
-				var clear := _segment_is_clear(initial, target - delta.normalized() * 32.0, PHYSICS.radius_for("striker", duboo_mode) + 2.0, piece["id"])
-				var score := delta.length() + (0.0 if clear else 850.0)
-				if score < best_fallback:
-					best_fallback = score
-					best = {"x": x, "dir": delta.normalized(), "speed": 690.0 if duboo_mode else 870.0, "target": target}
-	# Difficulty affects mechanical precision but not physics or legal pieces.
-	var drift: float = [0.085, 0.028, 0.007][cpu_skill]
-	var jitter: float = randf_range(-drift, drift)
-	best["dir"] = (best["dir"] as Vector2).rotated(jitter)
-	best["speed"] = clampf(float(best["speed"]) * randf_range(1.0 - drift * 1.6, 1.0 + drift * 1.6), 330.0 if duboo_mode else 420.0, _shot_speed_max())
-	return best
-
-func _segment_is_clear(a: Vector2, b: Vector2, clearance: float, excluded_id: int) -> bool:
-	var segment: Vector2 = b - a
-	var length_sq := segment.length_squared()
-	if length_sq < 0.01:
-		return true
+# CPU shot planning: generate physically feasible intentions, then play short
+# sandbox simulations using EXACTLY the player's disc/rail physics. This is
+# not a scripted pocket and never moves an opponent's pieces in the live game.
+# Search is spread across frames so even Expert remains usable in web builds.
+func _cpu_start_search() -> void:
+	cpu_plan_candidates.clear()
+	cpu_plan_ranked.clear()
+	cpu_plan_cursor = 0
+	cpu_plan_base_value = _cpu_position_value(discs)
+	var direct: Array[Dictionary] = []
+	var banks: Array[Dictionary] = []
+	var combos: Array[Dictionary] = []
+	var safeties: Array[Dictionary] = []
+	var own_before := _pocketed_count("black")
+	var striker_radius: float = PHYSICS.radius_for("striker", duboo_mode)
+	var base_y: float = CarromBoard.base_y(1, duboo_mode)
+	var left: float = 111.0 if duboo_mode else 125.0
+	var right: float = 569.0 if duboo_mode else 555.0
+	var samples: Array[float] = []
+	for i in range(11):
+		samples.append(lerpf(left, right, float(i) / 10.0))
+	# Also aim from x positions directly beneath useful ghost points.
+	var targets: Array[Dictionary] = []
 	for disc in discs:
-		if disc["pocketed"] or disc["kind"] == "striker" or disc["id"] == excluded_id:
+		if bool(disc["pocketed"]) or disc["kind"] == "striker":
 			continue
-		var center: Vector2 = disc["pos"]
-		var t := clampf((center - a).dot(segment) / length_sq, 0.0, 1.0)
-		var nearest: Vector2 = a + segment * t
-		if nearest.distance_squared_to(center) < pow(clearance + disc["radius"] * 0.15, 2):
+		if disc["kind"] == "black" or (disc["kind"] == "queen" and own_before > 0 and pending_queen == -1 and queen_owner == -1):
+			targets.append(disc)
+	for target_disc in targets:
+		var target: Vector2 = target_disc["pos"]
+		var target_id: int = int(target_disc["id"])
+		var radius: float = float(target_disc["radius"])
+		for pocket in PHYSICS.POCKETS:
+			var exit: Vector2 = (pocket - target).normalized()
+			var ghost: Vector2 = target - exit * (striker_radius + radius + 0.7)
+			var open_pocket: bool = _cpu_lane_open(target, pocket, radius * 1.75, target_id)
+			var xs: Array[float] = samples.duplicate()
+			xs.append(clampf(ghost.x, left, right))
+			for x in xs:
+				var origin := Vector2(x, base_y)
+				if not _can_place_striker(origin):
+					continue
+				var aim: Vector2 = ghost - origin
+				if aim.length_squared() < 1400.0:
+					continue
+				var direction: Vector2 = aim.normalized()
+				var travel: float = origin.distance_to(target)
+				if open_pocket and _cpu_lane_open(origin, ghost, striker_radius + 2.0, target_id):
+					var quality: float = 95.0 - travel * 0.032 - target.distance_to(pocket) * 0.035
+					if target_disc["kind"] == "queen":
+						quality -= 11.0
+					var speed: float = clampf(360.0 + travel * 0.48 + target.distance_to(pocket) * 0.40, 360.0, 980.0) if duboo_mode else clampf(455.0 + travel * 0.60 + target.distance_to(pocket) * 0.48, 500.0, 1320.0)
+					_cpu_add_intention(direct, x, direction, speed, quality, target, "direct")
+					_cpu_add_intention(direct, x, direction, speed * 0.77, quality - 2.5, target, "touch")
+				# One-rail striker banks: reflect the impact point across the rail.
+				# Both segments must be open; prediction decides if the bounce works.
+				if not open_pocket:
+					continue
+				for wall in range(3):
+					var wall_coord: float = striker_radius if wall == 0 or wall == 2 else 680.0 - striker_radius
+					var mirror: Vector2 = ghost
+					if wall == 2:
+						mirror.y = 2.0 * wall_coord - ghost.y
+					else:
+						mirror.x = 2.0 * wall_coord - ghost.x
+					var ray: Vector2 = mirror - origin
+					var denom: float = ray.y if wall == 2 else ray.x
+					if absf(denom) < 0.001:
+						continue
+					var t: float = (wall_coord - (origin.y if wall == 2 else origin.x)) / denom
+					if t < 0.10 or t > 0.90:
+						continue
+					var bounce: Vector2 = origin + ray * t
+					if bounce.x < striker_radius + 30.0 or bounce.x > 680.0 - striker_radius - 30.0 or bounce.y < striker_radius + 30.0 or bounce.y > 680.0 - striker_radius - 30.0:
+						# Coordinate ON the target rail is allowed; only test the other axis.
+						if (wall == 2 and (bounce.x < 50.0 or bounce.x > 630.0)) or (wall != 2 and (bounce.y < 50.0 or bounce.y > 630.0)):
+							continue
+					if not _cpu_lane_open(origin, bounce, striker_radius + 1.0, target_id):
+						continue
+					if not _cpu_lane_open(bounce, ghost, striker_radius + 1.0, target_id):
+						continue
+					var path_length: float = origin.distance_to(bounce) + bounce.distance_to(target)
+					var bank_power: float = clampf(520.0 + path_length * 0.48, 640.0, 1050.0) if duboo_mode else clampf(620.0 + path_length * 0.75, 800.0, 1420.0)
+					_cpu_add_intention(banks, x, ray.normalized(), bank_power, 58.0 - path_length * 0.016, target, "bank")
+		# Combination intentions: nudge an intervening piece into the target,
+		# using a genuine striker -> piece -> target collision chain.
+		for helper in discs:
+			if bool(helper["pocketed"]) or helper["kind"] == "striker" or int(helper["id"]) == target_id:
+				continue
+			var hpos: Vector2 = helper["pos"]
+			for pocket in PHYSICS.POCKETS:
+				var exit: Vector2 = (pocket - target).normalized()
+				var connection: Vector2 = target - hpos
+				var forward: float = connection.dot(exit)
+				var sideways: float = absf(connection.cross(exit))
+				if forward < 25.0 or forward > 235.0 or sideways > radius * 2.7:
+					continue
+				if not _cpu_lane_open(target, pocket, radius * 1.55, target_id):
+					continue
+				var combo_ghost: Vector2 = hpos - connection.normalized() * (striker_radius + float(helper["radius"]) + 0.5)
+				for x in samples:
+					var origin := Vector2(x, base_y)
+					if not _can_place_striker(origin) or not _cpu_lane_open(origin, combo_ghost, striker_radius + 1.2, int(helper["id"])):
+						continue
+					var aim: Vector2 = combo_ghost - origin
+					if aim.length_squared() < 300.0:
+						continue
+					var distance: float = aim.length() + connection.length()
+					var combo_speed: float = clampf(600.0 + distance * 0.38, 650.0, 1050.0) if duboo_mode else clampf(700.0 + distance * 0.52, 770.0, 1400.0)
+					_cpu_add_intention(combos, x, aim.normalized(), combo_speed, 59.0 - sideways * 0.5 - distance * 0.012 + (6.0 if helper["kind"] == "black" else -4.0), target, "combo")
+	# Safety / clearing shots are the fallback when direct geometry fails.
+	# Their outcomes are still simulated and judged for pocketing/fouls.
+	for target_disc in targets:
+		if target_disc["kind"] != "black":
+			continue
+		var target: Vector2 = target_disc["pos"]
+		for x in samples:
+			var origin := Vector2(x, base_y)
+			if not _can_place_striker(origin):
+				continue
+			var offset: Vector2 = target - origin
+			if offset.length_squared() < 1000.0 or not _cpu_lane_open(origin, target, striker_radius + 2.0, int(target_disc["id"])):
+				continue
+			var direction: Vector2 = offset.normalized()
+			var speed: float = clampf(420.0 + offset.length() * 0.34, 450.0, 900.0) if duboo_mode else clampf(550.0 + offset.length() * 0.60, 600.0, 1200.0)
+			_cpu_add_intention(safeties, x, direction, speed, 39.0 - offset.length() * 0.022, target, "clear")
+			_cpu_add_intention(safeties, x, direction.rotated(0.065), speed * 0.85, 30.0 - offset.length() * 0.02, target, "safety")
+			_cpu_add_intention(safeties, x, direction.rotated(-0.065), speed * 0.85, 30.0 - offset.length() * 0.02, target, "safety")
+	# Reserve slots for non-direct ideas even when simple pockets are present.
+	# Casual, Standard, Expert differ in BOTH search depth and shot precision.
+	var quotas: Array = [[7, 1, 1, 3], [12, 4, 3, 5], [19, 7, 6, 7]]
+	var limits: Array = quotas[clampi(cpu_skill, 0, 2)]
+	_cpu_reserve_candidates(direct, int(limits[0]), 3)
+	_cpu_reserve_candidates(banks, int(limits[1]), 2)
+	_cpu_reserve_candidates(combos, int(limits[2]), 2)
+	_cpu_reserve_candidates(safeties, int(limits[3]), 2)
+	# Opening breaks tend to have tightly packed targets and no free lanes.
+	# Keep a legal simple break available if the geometry found nothing else.
+	if cpu_plan_candidates.is_empty():
+		for x in samples:
+			var initial := Vector2(x, base_y)
+			if _can_place_striker(initial):
+				var speed: float = 820.0 if duboo_mode else 1100.0
+				cpu_plan_candidates.append({"x": x, "dir": (Vector2(340, 340) - initial).normalized(), "speed": speed, "target": Vector2(340, 340), "seed": 0.0, "style": "break"})
+	cpu_plan_candidates.shuffle()
+	cpu_plan_active = true
+
+func _cpu_reserve_candidates(pool: Array[Dictionary], amount: int, per_target: int) -> void:
+	pool.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["seed"]) > float(b["seed"]))
+	var used: Dictionary = {}
+	var taken := 0
+	# First favor several distinct pieces rather than dozens of near-identical
+	# aim lines for the same coin and pocket.
+	for candidate in pool:
+		if taken >= amount:
+			return
+		var target_key := str(candidate["target"])
+		var count: int = int(used.get(target_key, 0))
+		if count >= per_target:
+			continue
+		used[target_key] = count + 1
+		cpu_plan_candidates.append(candidate)
+		taken += 1
+	# If few pieces remain, spend any unused search slots refining that shot.
+	for candidate in pool:
+		if taken >= amount:
+			return
+		if candidate in cpu_plan_candidates:
+			continue
+		cpu_plan_candidates.append(candidate)
+		taken += 1
+
+func _cpu_add_intention(pool: Array[Dictionary], x: float, direction: Vector2, speed: float, merit: float, target: Vector2, style: String) -> void:
+	pool.append({"x": x, "dir": direction, "speed": clampf(speed, _shot_speed_min(), _shot_speed_max()), "target": target, "seed": merit, "style": style})
+
+func _cpu_lane_open(a: Vector2, b: Vector2, width: float, excluded_id: int) -> bool:
+	var offset: Vector2 = b - a
+	var len2: float = offset.length_squared()
+	if len2 < 1.0:
+		return true
+	for piece in discs:
+		if piece["pocketed"] or piece["kind"] == "striker" or int(piece["id"]) == excluded_id:
+			continue
+		var along: float = clampf(((piece["pos"] as Vector2) - a).dot(offset) / len2, 0.0, 1.0)
+		var near: Vector2 = a + offset * along
+		var needed: float = width + float(piece["radius"]) * 0.75
+		if near.distance_squared_to(piece["pos"]) < needed * needed:
 			return false
 	return true
+
+# Cheap post-shot positional assessment. A move that leaves black pieces near
+# open pockets and white ones awkward is preferable to a meaningless smash.
+func _cpu_state_lane_open(state: Array, start: Vector2, finish: Vector2, exclude_id: int) -> bool:
+	var segment: Vector2 = finish - start
+	var length_squared: float = segment.length_squared()
+	if length_squared < 1.0:
+		return true
+	for other in state:
+		if bool(other["pocketed"]) or other["kind"] == "striker" or int(other["id"]) == exclude_id:
+			continue
+		var proj: float = clampf(((other["pos"] as Vector2) - start).dot(segment) / length_squared, 0.0, 1.0)
+		var nearest: Vector2 = start + segment * proj
+		var clearance: float = float(other["radius"]) + 10.0
+		if nearest.distance_squared_to(other["pos"]) < clearance * clearance:
+			return false
+	return true
+
+func _cpu_position_value(state: Array) -> float:
+	var value := 0.0
+	for piece in state:
+		if piece["pocketed"] or piece["kind"] == "striker" or piece["kind"] == "queen":
+			continue
+		var nearest := 1000.0
+		var clean_lanes := 0
+		for hole in PHYSICS.POCKETS:
+			nearest = minf(nearest, (piece["pos"] as Vector2).distance_to(hole))
+			if _cpu_state_lane_open(state, piece["pos"], hole, int(piece["id"])):
+				clean_lanes += 1
+		var closeness: float = clampf((320.0 - nearest) / 8.0, -6.0, 24.0)
+		# Accessible white pocket lines are a future threat; keeping those
+		# lanes obscured creates genuine positional/defensive decisions.
+		if piece["kind"] == "black":
+			value += closeness + minf(2.0, float(clean_lanes)) * 5.0
+		else:
+			value -= closeness * 0.65 + minf(2.0, float(clean_lanes)) * 7.0
+	return value
+
+func _cpu_predict(candidate: Dictionary) -> float:
+	var test: Array = discs.duplicate(true)
+	var striker: Dictionary = test[test.size() - 1]
+	striker["pos"] = Vector2(float(candidate["x"]), CarromBoard.base_y(1, duboo_mode))
+	striker["vel"] = (candidate["dir"] as Vector2) * float(candidate["speed"])
+	striker["pocketed"] = false
+	var feedback: Array = []
+	var dt := 1.0 / 48.0
+	var steps: int = 402 if duboo_mode else 250
+	var substeps: int = 3 if duboo_mode else 2
+	for step in range(steps):
+		for _j in range(substeps):
+			PHYSICS.advance(test, dt / float(substeps), duboo_mode, feedback)
+			feedback.clear()
+		if step > 14 and PHYSICS.is_still(test):
+			break
+	var own := 0
+	var other := 0
+	var queen := false
+	var fouled := false
+	for index in range(test.size()):
+		if not test[index]["pocketed"] or discs[index]["pocketed"]:
+			continue
+		match str(test[index]["kind"]):
+			"black": own += 1
+			"white": other += 1
+			"queen": queen = true
+			"striker": fouled = true
+	var initial_black: int = _pocketed_count("black")
+	var score: float = 160.0 * own - 135.0 * other
+	if own >= 2:
+		score += 42.0 * float(own - 1)  # A genuine multi-pocket is worth pursuing.
+	if fouled:
+		score -= 390.0
+	if queen:
+		if initial_black == 0 and own < 2:
+			score -= 110.0  # Queen is illegally early and will return.
+		elif own > 0:
+			score += 115.0  # Queen and cover in one shot.
+		else:
+			score += 28.0  # Must cover on the next shot.
+	if pending_queen == 1:
+		score += 135.0 if own > 0 and not fouled else -115.0
+	if initial_black + own == 9:
+		if queen_owner == 1 or (queen and own > 0) or pending_queen == 1:
+			score += 480.0
+		else:
+			score -= 600.0  # Never deliberately lose by finishing too early.
+	var after_value: float = _cpu_position_value(test)
+	score += clampf((after_value - cpu_plan_base_value) * 0.55, -38.0, 38.0)
+	if own == 0:
+		score -= 22.0  # Losing your turn has a tactical cost.
+	if own == 0 and other == 0 and not queen:
+		score -= 8.0  # Discourage pointless hard breaks once spread out.
+	# Prefer reliable, short execution when simulated outcomes tie.
+	score += float(candidate["seed"]) * 0.038
+	return score
+
+func _cpu_search_frame() -> void:
+	# Fixed work-per-frame keeps the HUD responsive and avoids hitching on web.
+	var jobs := 1 if cpu_skill == 2 or duboo_mode else 2
+	for _j in range(jobs):
+		if cpu_plan_cursor >= cpu_plan_candidates.size():
+			break
+		var attempt: Dictionary = cpu_plan_candidates[cpu_plan_cursor]
+		cpu_plan_cursor += 1
+		var evaluated: Dictionary = attempt.duplicate()
+		evaluated["result"] = _cpu_predict(attempt)
+		cpu_plan_ranked.append(evaluated)
+	if cpu_plan_cursor < cpu_plan_candidates.size():
+		return
+	cpu_plan_active = false
+	cpu_plan_ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["result"]) > float(b["result"]))
+	var selected: Dictionary = {"x": 340.0, "dir": Vector2.DOWN, "speed": 750.0, "target": Vector2(340, 340)}
+	if not cpu_plan_ranked.is_empty():
+		var index := 0
+		if cpu_skill == 0 and cpu_plan_ranked.size() > 3 and randf() < 0.48:
+			index = randi_range(1, 3)
+		elif cpu_skill == 1 and cpu_plan_ranked.size() > 1 and randf() < 0.17:
+			index = 1
+		selected = cpu_plan_ranked[index].duplicate()
+	# Lower difficulty affects shot execution; Expert is almost mechanically
+	# exact, but no tier has a guaranteed outcome after the physical collision.
+	var drift: float = [0.055, 0.018, 0.0035][clampi(cpu_skill, 0, 2)]
+	selected["dir"] = (selected["dir"] as Vector2).rotated(randf_range(-drift, drift))
+	selected["speed"] = clampf(float(selected["speed"]) * randf_range(1.0 - drift * 1.3, 1.0 + drift * 1.3), _shot_speed_min(), _shot_speed_max())
+	cpu_queued_shot = selected
+	_place_striker(1, float(cpu_queued_shot["x"]))
+	board.aim_direction = cpu_queued_shot["dir"]
+	board.aim_power = inverse_lerp(_shot_speed_min(), _shot_speed_max(), cpu_queued_shot["speed"])
+	board.show_aim = true
+	board.show_cpu_target = true
+	board.cpu_target = cpu_queued_shot["target"]
+	board.queue_redraw()
+	phase = "cpu_aim"
+	cpu_time = 0.60
+	_set_status("CPU AIMING", "The computer has selected a shot.")
+	_refresh_ui()

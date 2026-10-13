@@ -1,0 +1,11 @@
+CARROM - Fixed Width Left Stats Panel
+
+- Desktop GAME STATS panel stays 244 px wide even when match/status text changes.
+- Left and right panels contain their scrollable content in clipping hosts that
+  isolate the panel's minimum size from variable-width labels.
+- Long CPU status headings wrap rather than pushing into the board.
+- Board diameter is based on the actual clear lane with a small safety gap,
+  rather than enforcing an overlapping minimum width at narrow window sizes.
+- All three CPU difficulty levels, game rules, modes, and physics are unchanged.
+
+Patch source: user-supplied scripts/game.gd; packaged atop carrom_cpu_refined.zip.

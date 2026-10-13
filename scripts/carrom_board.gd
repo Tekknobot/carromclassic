@@ -9,8 +9,10 @@ const INK := Color("#6e3026")
 const RED := Color("#9b292d")
 const CREAM := Color("#fff6dc")
 const GLOW := Color("#80d9c2")
+# Uniform width for all painted board marks, trims, rings, and veins.
+const BOARD_LINE_WIDTH := 1.0
 
-# Style 0 deliberately uses the original hand-drawn tournament board unchanged.
+# Style 0 retains the original hand-drawn tournament board design.
 # The seven additional designs are cosmetic; geometry and physics never change.
 const STYLE_NAMES := [
 	"CLASSIC TOURNAMENT", "DARK ROSEWOOD", "IVORY & WALNUT", "MODERN MINIMAL",
@@ -100,8 +102,8 @@ func _draw() -> void:
 			ac = Color("#68e9ed") if side == 0 else Color("#f4ad7b")
 		var zone_left := 112.0 if duboo_mode else 132.0
 		var zone_right := 568.0 if duboo_mode else 548.0
-		draw_line(Vector2(zone_left, baseline_y), Vector2(zone_right, baseline_y), Color(ac, 0.21), 5.0, true)
-		draw_line(Vector2(zone_left, baseline_y), Vector2(zone_right, baseline_y), Color(ac, 0.80), 1.5, true)
+		draw_line(Vector2(zone_left, baseline_y), Vector2(zone_right, baseline_y), Color(ac, 0.21), BOARD_LINE_WIDTH, true)
+		draw_line(Vector2(zone_left, baseline_y), Vector2(zone_right, baseline_y), Color(ac, 0.80), BOARD_LINE_WIDTH, true)
 		for end_x in [zone_left, zone_right]:
 			draw_circle(Vector2(end_x, baseline_y), 3.0, ac, true, -1.0, true)
 	_draw_discs()
@@ -143,10 +145,10 @@ func _draw_duboo_board() -> void:
 				for n in range(8):
 					var t := float(n) / 7.0
 					points.append(Vector2(clampf(x + (135.0 + float(k % 5) * 48.0) * t, 1.0, S - 1.0), clampf(y + 9.0 * sin(6.0 * t + float(k)), 1.0, S - 1.0)))
-				draw_polyline(points, Color(vein, 0.025 if k % 4 else 0.065), 0.75, true)
+				draw_polyline(points, Color(vein, 0.025 if k % 4 else 0.065), BOARD_LINE_WIDTH, true)
 			for k in range(7):
 				var y := 24.0 + float(k) * 94.0
-				draw_line(Vector2(14, y), Vector2(665, y + 9.0), Color(glint, 0.025), 8.0, true)
+				draw_line(Vector2(14, y), Vector2(665, y + 9.0), Color(glint, 0.025), BOARD_LINE_WIDTH, true)
 		1: # Carrara: broad diagonal, branching grey veins.
 			for k in range(25):
 				var x := -140.0 + float(k) * 46.0
@@ -154,35 +156,35 @@ func _draw_duboo_board() -> void:
 				for n in range(14):
 					var t := float(n) / 13.0
 					line.append(Vector2(clampf(x + 410.0 * t + 8.0 * sin(t * 9.0 + float(k)), 1.0, S - 1.0), 680.0 * t))
-				draw_polyline(line, Color(vein, 0.05 if k % 3 else 0.16), 0.75 if k % 3 else 2.0, true)
+				draw_polyline(line, Color(vein, 0.05 if k % 3 else 0.16), BOARD_LINE_WIDTH, true)
 			for k in range(12):
 				var a := Vector2(float((k * 153 + 41) % 680), float((k * 187 + 97) % 680))
-				draw_line(a, Vector2(clampf(a.x + 55.0, 1.0, S - 1.0), clampf(a.y - 32.0, 1.0, S - 1.0)), Color(vein, 0.11), 1.1, true)
+				draw_line(a, Vector2(clampf(a.x + 55.0, 1.0, S - 1.0), clampf(a.y - 32.0, 1.0, S - 1.0)), Color(vein, 0.11), BOARD_LINE_WIDTH, true)
 		2: # Basalt: dark mineral flecks and occasional tiny fractures.
 			for k in range(340):
 				var pt := Vector2(float((k * 173 + 13) % 666) + 7.0, float((k * 251 + 37) % 666) + 7.0)
 				draw_circle(pt, 0.45 + float(k % 4) * 0.35, Color(glint, 0.06 if k % 5 else 0.17))
 			for k in range(11):
 				var a := Vector2(float((k * 111 + 63) % 500) + 30.0, float((k * 163 + 23) % 600) + 20.0)
-				draw_line(a, Vector2(clampf(a.x + 28.0, 1.0, S - 1.0), clampf(a.y + 45.0, 1.0, S - 1.0)), Color(vein, 0.07), 1.0, true)
+				draw_line(a, Vector2(clampf(a.x + 28.0, 1.0, S - 1.0), clampf(a.y + 45.0, 1.0, S - 1.0)), Color(vein, 0.07), BOARD_LINE_WIDTH, true)
 		3: # Serpentine: sinuous quartz strands in deep green.
 			for k in range(35):
 				var strand := PackedVector2Array()
 				for n in range(25):
 					var t := float(n) / 24.0
 					strand.append(Vector2(t * S, clampf(28.0 + float(k) * 19.0 + 15.0 * sin(t * 11.0 + float(k) * 0.65), 1.0, S - 1.0)))
-				draw_polyline(strand, Color(vein, 0.035 if k % 4 else 0.16), 0.9 if k % 4 else 2.8, true)
+				draw_polyline(strand, Color(vein, 0.035 if k % 4 else 0.16), BOARD_LINE_WIDTH, true)
 		4: # Blue granite: a densely mineralised, polished surface.
 			for k in range(460):
 				var pt := Vector2(float((k * 127 + 21) % 668) + 6.0, float((k * 239 + 29) % 668) + 6.0)
 				draw_circle(pt, 0.5 + float(k % 4) * 0.32, Color(vein if k % 3 != 0 else glint, 0.08 if k % 7 != 0 else 0.24))
 			for k in range(9):
 				var y := float(k) * 79.0 + 13.0
-				draw_line(Vector2(14, y), Vector2(666, y + 18.0), Color(glint, 0.027), 7.0, true)
+				draw_line(Vector2(14, y), Vector2(666, y + 18.0), Color(glint, 0.027), BOARD_LINE_WIDTH, true)
 		5: # Travertine: sedimentary horizontal layers and small pores.
 			for k in range(62):
 				var y := 8.0 + float(k) * 11.0
-				draw_line(Vector2(5, y), Vector2(S - 5.0, y + 2.0 * sin(float(k))), Color(vein, 0.05 if k % 5 else 0.18), 0.85 if k % 5 else 2.5, true)
+				draw_line(Vector2(5, y), Vector2(S - 5.0, y + 2.0 * sin(float(k))), Color(vein, 0.05 if k % 5 else 0.18), BOARD_LINE_WIDTH, true)
 			for k in range(150):
 				var pt := Vector2(float((k * 241 + 61) % 656) + 12, float((k * 97 + 13) % 652) + 14)
 				draw_circle(pt, 0.55 + float(k % 3) * 0.6, Color(vein, 0.09), true)
@@ -192,7 +194,7 @@ func _draw_duboo_board() -> void:
 				for n in range(25):
 					var t := float(n) / 24.0
 					strand.append(Vector2(t * S, clampf(18.0 + float(k) * 17.0 + 21.0 * sin(t * 8.0 + float(k) * 0.34), 1.0, S - 1.0)))
-				draw_polyline(strand, Color(vein, 0.035 if k % 5 else 0.20), 1.0 if k % 5 else 3.5, true)
+				draw_polyline(strand, Color(vein, 0.035 if k % 5 else 0.20), BOARD_LINE_WIDTH, true)
 		7: # Terrazzo: polished stone aggregate chips with no busy grain.
 			for k in range(190):
 				var x := float((k * 167 + 47) % 652) + 14.0
@@ -202,27 +204,27 @@ func _draw_duboo_board() -> void:
 				draw_colored_polygon(points, Color(vein if k % 3 != 0 else glint, 0.14 if k % 4 != 0 else 0.25))
 	# Inlaid rings and baselines are consistent across designs and easy to read.
 	var c := Vector2(S * 0.5, S * 0.5)
-	draw_arc(c, 51.0, 0, TAU, 100, Color(inlay, 0.70), 1.65, true)
-	draw_arc(c, 9.0, 0, TAU, 36, Color(inlay, 0.72), 1.4, true)
-	draw_line(c + Vector2(-62, 0), c + Vector2(62, 0), Color(inlay, 0.32), 1.0, true)
-	draw_line(c + Vector2(0, -62), c + Vector2(0, 62), Color(inlay, 0.32), 1.0, true)
+	draw_arc(c, 51.0, 0, TAU, 100, Color(inlay, 0.70), BOARD_LINE_WIDTH, true)
+	draw_arc(c, 9.0, 0, TAU, 36, Color(inlay, 0.72), BOARD_LINE_WIDTH, true)
+	draw_line(c + Vector2(-62, 0), c + Vector2(62, 0), Color(inlay, 0.32), BOARD_LINE_WIDTH, true)
+	draw_line(c + Vector2(0, -62), c + Vector2(0, 62), Color(inlay, 0.32), BOARD_LINE_WIDTH, true)
 	if duboo_style_index == 3 or duboo_style_index == 6:
-		draw_arc(c, 59.0, 0, TAU, 100, Color(accent, 0.36), 1.0, true)
+		draw_arc(c, 59.0, 0, TAU, 100, Color(accent, 0.36), BOARD_LINE_WIDTH, true)
 	for face in range(4):
 		var y1 := 612.0
 		var y2 := 628.0
 		var x1 := 108.0
 		var x2 := 572.0
-		draw_line(_rotate_board(Vector2(x1, y1), face), _rotate_board(Vector2(x2, y1), face), Color(inlay, 0.75), 1.6, true)
-		draw_line(_rotate_board(Vector2(x1, y2), face), _rotate_board(Vector2(x2, y2), face), Color(inlay, 0.75), 1.6, true)
+		draw_line(_rotate_board(Vector2(x1, y1), face), _rotate_board(Vector2(x2, y1), face), Color(inlay, 0.75), BOARD_LINE_WIDTH, true)
+		draw_line(_rotate_board(Vector2(x1, y2), face), _rotate_board(Vector2(x2, y2), face), Color(inlay, 0.75), BOARD_LINE_WIDTH, true)
 		for endpoint in [x1, x2]:
 			var ep := _rotate_board(Vector2(endpoint, 620.0), face)
-			draw_arc(ep, 8.3, 0, TAU, 36, Color(inlay, 0.76), 1.5, true)
+			draw_arc(ep, 8.3, 0, TAU, 36, Color(inlay, 0.76), BOARD_LINE_WIDTH, true)
 	for pocket in CarromPhysics.POCKETS:
 		draw_circle(pocket, 21.0, pocket_rim)
 		draw_circle(pocket, 18.0, inner)
 		draw_circle(pocket, CarromPhysics.DUBOO_POCKET_RADIUS + 0.2, pocket_color)
-		draw_arc(pocket, 20.0, 0.18, PI * 1.4, 44, Color(accent, 0.68), 1.1, true)
+		draw_arc(pocket, 20.0, 0.18, PI * 1.4, 44, Color(accent, 0.68), BOARD_LINE_WIDTH, true)
 
 func _draw_classic_board() -> void:
 	# Cast-shadow, solid wood frame, inner inset and warm playing veneer.
@@ -237,10 +239,10 @@ func _draw_classic_board() -> void:
 	for i in range(62):
 		var gy := float((i * 47 + 13) % 663) + 8.0
 		var tone := Color(0.63, 0.34, 0.15, 0.035 if i % 3 else 0.055)
-		draw_line(Vector2(9, gy), Vector2(S - 9, gy + sin(float(i) * 2.1) * 1.8), tone, 1.0, true)
+		draw_line(Vector2(9, gy), Vector2(S - 9, gy + sin(float(i) * 2.1) * 1.8), tone, BOARD_LINE_WIDTH, true)
 	for k in range(4):
 		var tone := Color("#ffe3b5") if k % 2 == 0 else Color("#87542f")
-		draw_rect(Rect2(-36 + float(k) * 4, -36 + float(k) * 4, 752 - float(k) * 8, 752 - float(k) * 8), tone, false, 1.0)
+		draw_rect(Rect2(-36 + float(k) * 4, -36 + float(k) * 4, 752 - float(k) * 8, 752 - float(k) * 8), tone, false, BOARD_LINE_WIDTH)
 	# Four black pocket mouths with inner leather-like rings.
 	for pocket in CarromPhysics.POCKETS:
 		draw_circle(pocket, 28.5, Color("#7a482b"), true, -1, true)
@@ -249,8 +251,8 @@ func _draw_classic_board() -> void:
 		draw_circle(pocket + Vector2(-3.0, -3.0), 18.4, Color(0, 0, 0, 0.22), true, -1, true)
 	# Tournament-style center design and inward corner arrows.
 	var c: Vector2 = Vector2(S * 0.5, S * 0.5)
-	draw_arc(c, 218.0, 0, TAU, 160, INK, 2.25, true)
-	draw_arc(c, 14.65, 0, TAU, 48, INK, 2.6, true)
+	draw_arc(c, 218.0, 0, TAU, 160, INK, BOARD_LINE_WIDTH, true)
+	draw_arc(c, 14.65, 0, TAU, 48, INK, BOARD_LINE_WIDTH, true)
 	draw_circle(c, 7.0, RED, true, -1, true)
 	for q in range(4):
 		var angle := PI / 4.0 + float(q) * PI / 2.0
@@ -258,7 +260,7 @@ func _draw_classic_board() -> void:
 		var right := unit.orthogonal()
 		var near_pt := c + unit * 239.0
 		var far_pt := c + unit * 285.0
-		draw_line(near_pt, far_pt, INK, 2.4, true)
+		draw_line(near_pt, far_pt, INK, BOARD_LINE_WIDTH, true)
 		var head := PackedVector2Array([near_pt - unit * 2.0, near_pt + unit * 14.0 + right * 7.0, near_pt + unit * 14.0 - right * 7.0])
 		draw_colored_polygon(head, RED)
 	for face in range(4):
@@ -266,7 +268,7 @@ func _draw_classic_board() -> void:
 	# Small engraved corner patterns complete the board without visual clutter.
 	for ix in [81.0, S - 81.0]:
 		for iy in [81.0, S - 81.0]:
-			draw_arc(Vector2(ix, iy), 10.5, 0.0, TAU, 32, Color("#9c503d"), 1.2, true)
+			draw_arc(Vector2(ix, iy), 10.5, 0.0, TAU, 32, Color("#9c503d"), BOARD_LINE_WIDTH, true)
 
 func _draw_alternate_board() -> void:
 	var outer := _skin_color("outer")
@@ -292,14 +294,14 @@ func _draw_alternate_board() -> void:
 	for j in range(3):
 		var inset := float(j) * 3.0
 		var edge := Color(trim, 0.83 if j == 0 else 0.38)
-		draw_rect(Rect2(-33 + inset, -33 + inset, 746 - inset * 2.0, 746 - inset * 2.0), edge, false, 1.0)
+		draw_rect(Rect2(-33 + inset, -33 + inset, 746 - inset * 2.0, 746 - inset * 2.0), edge, false, BOARD_LINE_WIDTH)
 	# Material details are subtle so every disc remains clearly legible.
 	match style_index:
 		1: # Polished rosewood, continuous lateral grain and brass joinery.
 			for i in range(86):
 				var y := float((i * 41 + 17) % 676) + 2.0
 				var bend := sin(float(i) * 1.91) * 3.7
-				draw_line(Vector2(5, y), Vector2(S - 5.0, y + bend), Color(grain, 0.11 if i % 4 == 0 else 0.052), 1.0)
+				draw_line(Vector2(5, y), Vector2(S - 5.0, y + bend), Color(grain, 0.11 if i % 4 == 0 else 0.052), BOARD_LINE_WIDTH)
 			for corner_x in [-24.0, S + 24.0]:
 				for corner_y in [-24.0, S + 24.0]:
 					draw_circle(Vector2(corner_x, corner_y), 3.5, trim)
@@ -307,89 +309,88 @@ func _draw_alternate_board() -> void:
 		2: # Porcelain-like ivory face and walnut frame.
 			for i in range(41):
 				var x := float(i * 19 + 5)
-				draw_line(Vector2(x, 4), Vector2(x - 8, S - 4), Color(grain, 0.025), 1.0)
+				draw_line(Vector2(x, 4), Vector2(x - 8, S - 4), Color(grain, 0.025), BOARD_LINE_WIDTH)
 			for t in range(4):
-				draw_rect(Rect2(16 + float(t) * 4.0, 16 + float(t) * 4.0, 648 - float(t) * 8.0, 648 - float(t) * 8.0), Color(detail, 0.14 if t == 0 else 0.045), false, 1.0)
+				draw_rect(Rect2(16 + float(t) * 4.0, 16 + float(t) * 4.0, 648 - float(t) * 8.0, 648 - float(t) * 8.0), Color(detail, 0.14 if t == 0 else 0.045), false, BOARD_LINE_WIDTH)
 		3: # Contemporary matte face, almost no grain.
 			for k in range(4):
 				var y := 45.0 + float(k) * 196.0
-				draw_line(Vector2(50, y), Vector2(S - 50, y), Color(grain, 0.035), 1.0)
+				draw_line(Vector2(50, y), Vector2(S - 50, y), Color(grain, 0.035), BOARD_LINE_WIDTH)
 			for k in range(4):
 				var x := 45.0 + float(k) * 196.0
-				draw_line(Vector2(x, 50), Vector2(x, S - 50), Color(grain, 0.035), 1.0)
+				draw_line(Vector2(x, 50), Vector2(x, S - 50), Color(grain, 0.035), BOARD_LINE_WIDTH)
 		4: # Amber patina and small hand-carved marks.
 			for i in range(93):
 				var y := float((i * 43 + 21) % 672) + 4.0
-				draw_line(Vector2(7, y), Vector2(S - 8, y + sin(float(i)) * 2.8), Color(grain, 0.045 if i % 3 else 0.09), 1.0)
+				draw_line(Vector2(7, y), Vector2(S - 8, y + sin(float(i)) * 2.8), Color(grain, 0.045 if i % 3 else 0.09), BOARD_LINE_WIDTH)
 			for x in [43.0, 637.0]:
 				for y in [43.0, 637.0]:
-					draw_arc(Vector2(x, y), 15.0, 0.0, TAU, 48, Color(detail, 0.45), 1.2, true)
-					draw_arc(Vector2(x, y), 9.0, 0.0, TAU, 40, Color(mark, 0.35), 1.0, true)
+					draw_arc(Vector2(x, y), 15.0, 0.0, TAU, 48, Color(detail, 0.45), BOARD_LINE_WIDTH, true)
+					draw_arc(Vector2(x, y), 9.0, 0.0, TAU, 40, Color(mark, 0.35), BOARD_LINE_WIDTH, true)
 		5: # Jet-black enamel with hairline metallic machining.
 			for i in range(48):
 				var y := float(i) * 14.0 + 10.0
-				draw_line(Vector2(10, y), Vector2(S - 10, y), Color(grain, 0.027), 1.0)
+				draw_line(Vector2(10, y), Vector2(S - 10, y), Color(grain, 0.027), BOARD_LINE_WIDTH)
 			for x in [42.0, 638.0]:
 				for y in [42.0, 638.0]:
 					_draw_diamond(Vector2(x, y), 11.0, Color(trim, 0.57))
 		6: # Sun-warmed teak: plank seams and turquoise accents.
 			for i in range(1, 8):
 				var x := float(i) * 85.0
-				draw_line(Vector2(x, 5.0), Vector2(x, S - 5.0), Color(grain, 0.095), 1.2)
+				draw_line(Vector2(x, 5.0), Vector2(x, S - 5.0), Color(grain, 0.095), BOARD_LINE_WIDTH)
 			for i in range(68):
 				var y := float((i * 29 + 7) % 673) + 4.0
-				draw_line(Vector2(8, y), Vector2(S - 8, y + sin(float(i) * 1.4)), Color(grain, 0.045), 1.0)
+				draw_line(Vector2(8, y), Vector2(S - 8, y + sin(float(i) * 1.4)), Color(grain, 0.045), BOARD_LINE_WIDTH)
 		7: # Sleek arcade board with fine luminous grid lines.
 			for i in range(1, 17):
 				var x := float(i) * 40.0
-				draw_line(Vector2(x, 4), Vector2(x, S - 4), Color(ink, 0.055), 1.0)
-				draw_line(Vector2(4, x), Vector2(S - 4, x), Color(ink, 0.055), 1.0)
+				draw_line(Vector2(x, 4), Vector2(x, S - 4), Color(ink, 0.055), BOARD_LINE_WIDTH)
+				draw_line(Vector2(4, x), Vector2(S - 4, x), Color(ink, 0.055), BOARD_LINE_WIDTH)
 			for k in range(4):
 				var at := Vector2(40.0 if k % 2 == 0 else 640.0, 40.0 if k < 2 else 640.0)
-				draw_arc(at, 31.0, 0, TAU, 60, Color(mark, 0.25), 2.5, true)
+				draw_arc(at, 31.0, 0, TAU, 60, Color(mark, 0.25), BOARD_LINE_WIDTH, true)
 	# All boards retain the official-style center ring and four baseline layouts.
 	var c := Vector2(S * 0.5, S * 0.5)
-	var line_width := 1.7 if style_index == 3 else 2.25
 	if style_index == 7:
-		draw_arc(c, 218.0, 0.0, TAU, 160, Color(ink, 0.17), 6.0, true)
-		draw_arc(c, 218.0, 0.0, TAU, 160, Color(ink, 0.28), 3.7, true)
-	draw_arc(c, 218.0, 0, TAU, 160, ink, line_width, true)
-	draw_arc(c, 14.65, 0, TAU, 48, ink, 2.6, true)
+		draw_arc(c, 218.0, 0.0, TAU, 160, Color(ink, 0.17), BOARD_LINE_WIDTH, true)
+		draw_arc(c, 218.0, 0.0, TAU, 160, Color(ink, 0.28), BOARD_LINE_WIDTH, true)
+	draw_arc(c, 218.0, 0, TAU, 160, ink, BOARD_LINE_WIDTH, true)
+	draw_arc(c, 14.65, 0, TAU, 48, ink, BOARD_LINE_WIDTH, true)
 	draw_circle(c, 7.0, mark)
 	if style_index == 1:
-		draw_arc(c, 209.0, 0, TAU, 160, Color(detail, 0.42), 1.0, true)
-		draw_arc(c, 25.0, 0, TAU, 80, Color(trim, 0.45), 1.0, true)
+		draw_arc(c, 209.0, 0, TAU, 160, Color(detail, 0.42), BOARD_LINE_WIDTH, true)
+		draw_arc(c, 25.0, 0, TAU, 80, Color(trim, 0.45), BOARD_LINE_WIDTH, true)
 	elif style_index == 2:
-		draw_arc(c, 207.0, 0, TAU, 160, Color(detail, 0.34), 1.0, true)
-		draw_arc(c, 32.0, 0, TAU, 80, Color(mark, 0.35), 1.1, true)
+		draw_arc(c, 207.0, 0, TAU, 160, Color(detail, 0.34), BOARD_LINE_WIDTH, true)
+		draw_arc(c, 32.0, 0, TAU, 80, Color(mark, 0.35), BOARD_LINE_WIDTH, true)
 	elif style_index == 3:
-		draw_line(c + Vector2(-28, 0), c + Vector2(28, 0), Color(ink, 0.25), 1.0)
-		draw_line(c + Vector2(0, -28), c + Vector2(0, 28), Color(ink, 0.25), 1.0)
+		draw_line(c + Vector2(-28, 0), c + Vector2(28, 0), Color(ink, 0.25), BOARD_LINE_WIDTH)
+		draw_line(c + Vector2(0, -28), c + Vector2(0, 28), Color(ink, 0.25), BOARD_LINE_WIDTH)
 	elif style_index == 4:
 		for k in range(12):
 			var a := float(k) * TAU / 12.0
 			var point := c + Vector2.from_angle(a) * 207.0
 			draw_circle(point, 2.2, Color(detail, 0.34))
-		draw_arc(c, 198.0, 0, TAU, 150, Color(mark, 0.16), 1.1, true)
+		draw_arc(c, 198.0, 0, TAU, 150, Color(mark, 0.16), BOARD_LINE_WIDTH, true)
 	elif style_index == 5:
-		draw_arc(c, 224.0, 0, TAU, 160, Color(trim, 0.20), 2.0, true)
+		draw_arc(c, 224.0, 0, TAU, 160, Color(trim, 0.20), BOARD_LINE_WIDTH, true)
 		for k in range(8):
 			_draw_diamond(c + Vector2.from_angle(float(k) * TAU / 8.0) * 199.0, 6.5, Color(trim, 0.42))
 	elif style_index == 6:
-		draw_arc(c, 207.0, 0, TAU, 160, Color(detail, 0.36), 1.0, true)
+		draw_arc(c, 207.0, 0, TAU, 160, Color(detail, 0.36), BOARD_LINE_WIDTH, true)
 		for k in range(12):
 			var a := float(k) * TAU / 12.0
-			draw_line(c + Vector2.from_angle(a) * 28.0, c + Vector2.from_angle(a) * 36.0, Color(detail, 0.45), 1.0)
+			draw_line(c + Vector2.from_angle(a) * 28.0, c + Vector2.from_angle(a) * 36.0, Color(detail, 0.45), BOARD_LINE_WIDTH)
 	elif style_index == 7:
-		draw_arc(c, 209.0, 0, TAU, 160, Color(mark, 0.46), 1.1, true)
-		draw_arc(c, 28.0, 0, TAU, 80, Color(mark, 0.35), 1.5, true)
+		draw_arc(c, 209.0, 0, TAU, 160, Color(mark, 0.46), BOARD_LINE_WIDTH, true)
+		draw_arc(c, 28.0, 0, TAU, 80, Color(mark, 0.35), BOARD_LINE_WIDTH, true)
 	for q in range(4):
 		var angle := PI / 4.0 + float(q) * PI / 2.0
 		var unit := Vector2.from_angle(angle)
 		var right := unit.orthogonal()
 		var near_pt := c + unit * 239.0
 		var far_pt := c + unit * 285.0
-		draw_line(near_pt, far_pt, ink, line_width, true)
+		draw_line(near_pt, far_pt, ink, BOARD_LINE_WIDTH, true)
 		var head := PackedVector2Array([near_pt - unit * 2.0, near_pt + unit * 14.0 + right * 7.0, near_pt + unit * 14.0 - right * 7.0])
 		draw_colored_polygon(head, mark)
 	for face in range(4):
@@ -400,9 +401,9 @@ func _draw_alternate_board() -> void:
 			if style_index == 3:
 				_draw_diamond(corner, 8.0, Color(detail, 0.7))
 			elif style_index == 7:
-				draw_arc(corner, 11.0, 0, TAU, 44, mark, 1.3, true)
+				draw_arc(corner, 11.0, 0, TAU, 44, mark, BOARD_LINE_WIDTH, true)
 			else:
-				draw_arc(corner, 10.5, 0, TAU, 32, Color(detail, 0.72), 1.2, true)
+				draw_arc(corner, 10.5, 0, TAU, 32, Color(detail, 0.72), BOARD_LINE_WIDTH, true)
 	# Physical pockets have exactly the same centers and hole radius as classic.
 	for pocket in CarromPhysics.POCKETS:
 		draw_circle(pocket, 28.5, _skin_color("pocket_ring"))
@@ -410,7 +411,7 @@ func _draw_alternate_board() -> void:
 		draw_circle(pocket, 22.0, _skin_color("pocket"))
 		draw_circle(pocket + Vector2(-3.0, -3.0), 18.4, Color(0, 0, 0, 0.22))
 		if style_index == 7:
-			draw_arc(pocket, 28.0, 0, TAU, 60, Color(mark, 0.33), 1.4, true)
+			draw_arc(pocket, 28.0, 0, TAU, 60, Color(mark, 0.33), BOARD_LINE_WIDTH, true)
 
 func _draw_diamond(center: Vector2, radius: float, color: Color) -> void:
 	var points := PackedVector2Array([
@@ -429,7 +430,7 @@ func _draw_baseline(face: int) -> void:
 	for x in [124.0, 556.0]:
 		var point := _rotate_board(Vector2(x, 573.5), face)
 		draw_circle(point, 15.0, _red(), true, -1, true)
-		draw_arc(point, 15.8, 0, TAU, 40, _ink(), 1.8, true)
+		draw_arc(point, 15.8, 0, TAU, 40, _ink(), BOARD_LINE_WIDTH, true)
 		draw_circle(point, 6.5, Color("#d36a58") if style_index == 0 else Color(_red(), 0.58), true, -1, true)
 
 func _rotate_board(p: Vector2, quarter_turns: int) -> Vector2:
@@ -437,7 +438,7 @@ func _rotate_board(p: Vector2, quarter_turns: int) -> Vector2:
 	return Vector2(S / 2.0, S / 2.0) + v.rotated(float(quarter_turns) * PI / 2.0)
 
 func _draw_side_line(a: Vector2, b: Vector2, face: int) -> void:
-	draw_line(_rotate_board(a, face), _rotate_board(b, face), _ink(), 2.0, true)
+	draw_line(_rotate_board(a, face), _rotate_board(b, face), _ink(), BOARD_LINE_WIDTH, true)
 
 static func base_y(who: int, duboo: bool = false) -> float:
 	if duboo:
