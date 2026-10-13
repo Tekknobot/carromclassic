@@ -20,7 +20,7 @@ const PANEL_LIFT := Color("#24443c")
 const MOBILE_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_mobile.png")
 const DESKTOP_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_desktop.png")
 const MOBILE_MENU_BUTTON := preload("res://scripts/mobile_menu_icon.gd")
-const MAX_BOARD_COUNT := 8
+const MAX_BOARD_COUNT := 1
 const MATCH_TARGET := 25
 const MIN_SHOT_SPEED := 320.0
 const MAX_SHOT_SPEED := 1425.0
@@ -531,7 +531,7 @@ func _build_ui() -> void:
 	_label(stats, "GAME STATS", 12, MINT)
 	_sidebar_rule(stats)
 	_label(stats, "THE MATCH", 11, MUTED)
-	match_info = _label(stats, "BOARD 1 OF 8  /  FIRST TO 25", 14, TEXT, true)
+	match_info = _label(stats, "QUICK MATCH / ONE BOARD", 14, TEXT, true)
 	match_info.custom_minimum_size.y = 38
 	var scoreboard := VBoxContainer.new()
 	scoreboard.add_theme_constant_override("separation", 8)
@@ -1782,7 +1782,14 @@ func _refresh_ui() -> void:
 	main_score_black.text = str(_pocketed_count("black")) if duboo_mode else str(totals[1])
 	coins_white.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("white")
 	coins_black.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("black")
-	match_info.text = "DUBOO   /   ONE BOARD" if duboo_mode else ("BOARD %d OF %d    |    FIRST TO %d" % [board_number, MAX_BOARD_COUNT, MATCH_TARGET])
+	if duboo_mode:
+		match_info.text = "DUBOO / ONE BOARD"
+	elif MAX_BOARD_COUNT == 1:
+		match_info.text = "QUICK MATCH / ONE BOARD"
+	else:
+		match_info.text = "BOARD %d OF %d / FIRST TO %d" % [
+			board_number, MAX_BOARD_COUNT, MATCH_TARGET
+		]
 	if pending_queen != -1:
 		queen_text.text = "  QUEEN  /  %s MUST COVER" % ("YOU" if pending_queen == 0 else "CPU")
 	elif queen_owner != -1:
