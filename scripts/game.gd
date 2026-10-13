@@ -82,6 +82,39 @@ var board_style_next: Button
 const SETTINGS_PATH := "user://carrom_board_settings.cfg"
 var tip_label: Label
 
+# A separate, portrait-only control surface. Desktop input/layout is unchanged.
+var portrait_touch := false
+var mobile_score_panel: PanelContainer
+var mobile_match_label: Label
+var mobile_score_headings: Array[Label] = []
+var mobile_you: Label
+var mobile_cpu: Label
+var mobile_queen: Label
+var mobile_status_panel: PanelContainer
+var mobile_status_title: Label
+var mobile_status_hint: Label
+var mobile_power_panel: PanelContainer
+var mobile_power_label: Label
+var mobile_power_meter: ProgressBar
+var mobile_fire: Button
+var mobile_style_bar: HBoxContainer
+var mobile_style_prev: Button
+var mobile_style_next: Button
+var mobile_style_name: Label
+var mobile_mobile_scale := 1.0
+var mobile_action_bar: HBoxContainer
+var mobile_cpu_select: OptionButton
+var mobile_rules: Button
+var mobile_restart: Button
+var mobile_next: Button
+var mobile_board_finger := -1
+var mobile_charge_finger := -1
+var mobile_board_mouse_down := false
+var mobile_mouse_charge := false
+var mobile_drag_baseline := false
+var mobile_aim_target := Vector2(340.0, 340.0)
+var mobile_ignore_synthetic_mouse := 0.0
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	_load_board_style()
@@ -90,6 +123,7 @@ func _ready() -> void:
 	board.set_style(board_style_index)
 	board.set_duboo_style(duboo_style_index)
 	_build_ui()
+	_build_mobile_ui()
 	_refresh_mode_ui()
 	_build_audio()
 	_refresh_board_style_ui()
@@ -330,7 +364,11 @@ func _build_ui() -> void:
 	cpu_selector.add_theme_color_override("font_color", TEXT)
 	cpu_selector.add_theme_stylebox_override("normal", _style(PANEL_ALT, Color("#46665a"), 9))
 	cpu_selector.add_theme_stylebox_override("hover", _style(Color("#345a4e"), Color.TRANSPARENT, 9))
-	cpu_selector.item_selected.connect(func(idx: int) -> void: cpu_skill = idx)
+	cpu_selector.item_selected.connect(func(idx: int) -> void:
+		cpu_skill = idx
+		if mobile_cpu_select != null:
+			mobile_cpu_select.select(idx)
+	)
 	content.add_child(cpu_selector)
 	# One concise controls reminder belongs below the board, not in the sidebar.
 	var bottom_buttons := HBoxContainer.new()
@@ -341,6 +379,177 @@ func _build_ui() -> void:
 	restart_button = _make_button(bottom_buttons, "NEW MATCH", false)
 	restart_button.pressed.connect(_new_match)
 	_build_rules_overlay()
+
+func _mobile_label(parent: Node, value: String, font_size: int, color: Color) -> Label:
+	var label := _label(parent, value, font_size, color, false)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.clip_text = true
+	return label
+
+func _mobile_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	var skin := _style(Color("#1d3b35"), Color("#426f60"), 11)
+	skin.content_margin_left = 9.0
+	skin.content_margin_right = 9.0
+	skin.content_margin_top = 5.0
+	skin.content_margin_bottom = 5.0
+	panel.add_theme_stylebox_override("panel", skin)
+	panel.visible = false
+	add_child(panel)
+	return panel
+
+func _build_mobile_ui() -> void:
+	# Phone UI has its own hierarchy; no desktop sidebar is scaled onto a phone.
+	mobile_match_label = _mobile_label(self, "BOARD 1 / 8", 16, GOLD)
+	mobile_match_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	mobile_match_label.visible = false
+	# Flat, separate regions: mode, score, board, status, charge, theme, actions.
+	# No mobile input widgets ever sit on top of the physical board.
+	mobile_score_panel = _mobile_panel()
+	var scores := HBoxContainer.new()
+	scores.add_theme_constant_override("separation", 3)
+	mobile_score_panel.add_child(scores)
+	var you_stack := VBoxContainer.new()
+	you_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scores.add_child(you_stack)
+	mobile_score_headings.append(_mobile_label(you_stack, "YOU / WHITE", 13, MINT))
+	mobile_you = _mobile_label(you_stack, "0 / 9", 18, TEXT)
+	var queen_stack := VBoxContainer.new()
+	queen_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scores.add_child(queen_stack)
+	mobile_score_headings.append(_mobile_label(queen_stack, "QUEEN", 13, Color("#f28b8b")))
+	mobile_queen = _mobile_label(queen_stack, "ON BOARD", 11, TEXT)
+	var cpu_stack := VBoxContainer.new()
+	cpu_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scores.add_child(cpu_stack)
+	mobile_score_headings.append(_mobile_label(cpu_stack, "CPU / BLACK", 13, GOLD))
+	mobile_cpu = _mobile_label(cpu_stack, "0 / 9", 18, TEXT)
+
+	mobile_status_panel = _mobile_panel()
+	var status_stack := VBoxContainer.new()
+	status_stack.add_theme_constant_override("separation", 0)
+	mobile_status_panel.add_child(status_stack)
+	mobile_status_title = _mobile_label(status_stack, "YOUR BREAK", 12, MINT)
+	mobile_status_hint = _mobile_label(status_stack, "SLIDE THE STRIKER ON THE BASELINE", 10, TEXT)
+
+	mobile_power_panel = _mobile_panel()
+	var power_row := HBoxContainer.new()
+	power_row.add_theme_constant_override("separation", 11)
+	mobile_power_panel.add_child(power_row)
+	var power_stack := VBoxContainer.new()
+	power_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	power_stack.add_theme_constant_override("separation", 7)
+	power_row.add_child(power_stack)
+	mobile_power_label = _mobile_label(power_stack, "POWER  0%", 15, TEXT)
+	mobile_power_meter = ProgressBar.new()
+	mobile_power_meter.min_value = 0.0
+	mobile_power_meter.max_value = 100.0
+	mobile_power_meter.show_percentage = false
+	mobile_power_meter.custom_minimum_size.y = 11.0
+	mobile_power_meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mobile_power_meter.add_theme_stylebox_override("background", _style(Color("#102522"), Color.TRANSPARENT, 5))
+	mobile_power_meter.add_theme_stylebox_override("fill", _style(MINT, Color.TRANSPARENT, 5))
+	power_stack.add_child(mobile_power_meter)
+	mobile_fire = _make_button(power_row, "HOLD TO SHOOT", true)
+	mobile_fire.custom_minimum_size = Vector2(145, 66)
+	mobile_fire.size_flags_horizontal = Control.SIZE_SHRINK_END
+	# Hit testing happens in _input: touch release outside this rectangle
+	# must still release the shot, and the other finger may aim concurrently.
+	mobile_fire.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# The unavailable state must remain readable while a player places the striker.
+	mobile_fire.add_theme_stylebox_override("disabled", _style(Color("#34594e"), Color("#638b7b"), 9))
+	mobile_fire.add_theme_color_override("font_disabled_color", Color("#dcebe4"))
+
+	mobile_style_bar = HBoxContainer.new()
+	mobile_style_bar.add_theme_constant_override("separation", 5)
+	mobile_style_bar.visible = false
+	add_child(mobile_style_bar)
+	mobile_style_prev = _make_button(mobile_style_bar, "PREV")
+	mobile_style_prev.custom_minimum_size.x = 61
+	mobile_style_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	mobile_style_prev.pressed.connect(func() -> void: _cycle_board_style(-1))
+	mobile_style_name = _mobile_label(mobile_style_bar, "CLASSIC TOURNAMENT", 11, MINT)
+	mobile_style_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mobile_style_next = _make_button(mobile_style_bar, "NEXT")
+	mobile_style_next.custom_minimum_size.x = 61
+	mobile_style_next.size_flags_horizontal = Control.SIZE_SHRINK_END
+	mobile_style_next.pressed.connect(func() -> void: _cycle_board_style(1))
+
+	mobile_action_bar = HBoxContainer.new()
+	mobile_action_bar.add_theme_constant_override("separation", 5)
+	mobile_action_bar.visible = false
+	add_child(mobile_action_bar)
+	mobile_cpu_select = OptionButton.new()
+	mobile_cpu_select.add_item("CASUAL", 0)
+	mobile_cpu_select.add_item("STANDARD", 1)
+	mobile_cpu_select.add_item("EXPERT", 2)
+	mobile_cpu_select.select(cpu_skill)
+	mobile_cpu_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mobile_cpu_select.add_theme_font_size_override("font_size", 16)
+	mobile_cpu_select.add_theme_color_override("font_color", TEXT)
+	mobile_cpu_select.add_theme_stylebox_override("normal", _style(PANEL_ALT, Color("#46665a"), 8))
+	mobile_cpu_select.item_selected.connect(func(index: int) -> void:
+		cpu_skill = index
+		cpu_selector.select(index)
+	)
+	mobile_action_bar.add_child(mobile_cpu_select)
+	mobile_rules = _make_button(mobile_action_bar, "RULES")
+	mobile_rules.pressed.connect(_open_rules)
+	mobile_restart = _make_button(mobile_action_bar, "RESTART")
+	mobile_restart.pressed.connect(_new_match)
+	mobile_next = _make_button(mobile_action_bar, "NEXT BOARD", true)
+	mobile_next.pressed.connect(_next_board)
+	mobile_next.visible = false
+
+func _mobile_sync() -> void:
+	if mobile_score_panel == null:
+		return
+	mobile_you.text = "%d / 9" % _pocketed_count("white") if duboo_mode else "%d PTS / %d" % [totals[0], _pocketed_count("white")]
+	mobile_cpu.text = "%d / 9" % _pocketed_count("black") if duboo_mode else "%d PTS / %d" % [totals[1], _pocketed_count("black")]
+	if pending_queen >= 0:
+		mobile_queen.text = "COVER IT" if pending_queen == 0 else "CPU COVER"
+	elif queen_owner >= 0:
+		mobile_queen.text = "YOURS" if queen_owner == 0 else "CPU HAS IT"
+	else:
+		mobile_queen.text = "ON BOARD"
+	mobile_status_title.text = status_title
+	if phase == "placement":
+		mobile_status_hint.text = "DRAG THE BASELINE TO PLACE"
+	elif phase == "aim":
+		mobile_status_hint.text = "DRAG TO AIM  -  HOLD SHOOT"
+	elif phase == "charging":
+		mobile_status_hint.text = "RELEASE TO SHOOT"
+	elif phase == "moving":
+		mobile_status_hint.text = "WAIT FOR PIECES TO STOP"
+	elif phase in ["cpu_aim", "cpu_think"]:
+		mobile_status_hint.text = "OPPONENT PLAYING"
+	else:
+		mobile_status_hint.text = "CONTINUE USING BUTTONS BELOW"
+	mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0)) if phase == "charging" else "SHOT POWER"
+	mobile_power_meter.value = charge_power * 100.0 if phase == "charging" else 0.0
+	mobile_fire.disabled = phase not in ["aim", "charging"] or player_turn != 0 or rules_overlay.visible
+	mobile_next.visible = phase == "board_over"
+	mobile_restart.visible = phase != "board_over"
+	mobile_restart.text = "NEW GAME" if duboo_mode else "RESTART"
+	mobile_style_name.text = CarromBoard.DUBOO_STYLE_NAMES[duboo_style_index] if duboo_mode else CarromBoard.STYLE_NAMES[board_style_index]
+	mobile_match_label.text = "DUBOO / ONE BOARD" if duboo_mode else "BOARD %d / 8" % board_number
+	if mobile_cpu_select.selected != cpu_skill:
+		mobile_cpu_select.select(cpu_skill)
+
+func _mobile_fire_visual(held: bool) -> void:
+	if mobile_fire == null:
+		return
+	mobile_fire.add_theme_stylebox_override("normal", _style(GOLD if held else MINT, Color.TRANSPARENT, 9))
+	mobile_fire.add_theme_color_override("font_color", INK)
+
+func _cancel_mobile_charge() -> void:
+	mobile_charge_finger = -1
+	mobile_mouse_charge = false
+	if phase == "charging" and player_turn == 0:
+		phase = "aim"
+		board.charging = false
+	_mobile_fire_visual(false)
 
 func _cream_color() -> Color:
 	return Color("#f8eacc")
@@ -388,6 +597,8 @@ func _build_rules_overlay() -> void:
 func _set_mode(use_duboo: bool) -> void:
 	if duboo_mode == use_duboo:
 		return
+	_cancel_mobile_charge()
+	mobile_board_finger = -1
 	duboo_mode = use_duboo
 	board.duboo_mode = duboo_mode
 	_refresh_mode_ui()
@@ -416,7 +627,10 @@ func _refresh_mode_ui() -> void:
 			rules_body.text = "DUBOO - KARACHI-INSPIRED\nPlay a single board on a large slate/marble-style table with smaller counters, compact markings, and an oversize open-centred acrylic ring. The ring is much larger than the pocket and cannot fall into it. The physics are gameplay approximations.\n\nPLAY\nClick the bottom baseline to position the ring. Aim, hold left mouse to charge, then release. The controls are identical to Classic.\n\nOBJECTIVE\nPocket all nine of your colour and legally secure the Queen. Pocket your colour to shoot again. CPU plays black.\n\nQUEEN AND FOULS\nQueen and cover rules follow this game's existing adaptation. A ring-pocket foul is impossible because the ring cannot fit a hole.\n\nMATCH\nA single completed board determines the winner. Select NEW BOARD to restart."
 		else:
 			rules_body.text = "OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nYou keep shooting whenever you pocket your color; otherwise the turn passes.\n\nTHE QUEEN\nYou must first pocket a piece of your color. Pocket the Queen and another piece in the same shot or cover it on your next shot. If not covered, she returns to the center.\n\nSTRIKER FOUL\nPocketing the striker costs one of your pocketed pieces, or creates an owed piece, and ends the turn.\n\nSCORING\nFirst to 25 points or the leader after eight boards wins. Uncommon compound fouls are simplified."
+	if portrait_touch:
+		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nDrag the striker along the lower baseline to place it. Drag anywhere on the board to aim. Hold the SHOOT button to build power, then lift your finger to strike. You can use a second finger to adjust aim while charging."
 	_refresh_board_style_ui()
+	_mobile_sync()
 	board.queue_redraw()
 
 func _shot_speed_min() -> float:
@@ -429,6 +643,22 @@ func _layout() -> void:
 	if board == null or side_panel == null:
 		return
 	var sz := size
+	var should_portrait := sz.y > sz.x * 1.06
+	if should_portrait != portrait_touch:
+		_cancel_mobile_charge()
+		mobile_board_finger = -1
+		mobile_board_mouse_down = false
+		portrait_touch = should_portrait
+	if portrait_touch:
+		_layout_portrait(sz)
+		return
+	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_bar, mobile_action_bar, mobile_match_label]:
+		mobile_node.visible = false
+	classic_button.add_theme_font_size_override("font_size", 14)
+	duboo_button.add_theme_font_size_override("font_size", 14)
+	side_panel.visible = true
+	board_caption.visible = true
+	tip_label.visible = true
 	var side_w := minf(clampf(sz.x * 0.315, 332.0, 452.0), maxf(280.0, sz.x * 0.42))
 	var side_x := sz.x - side_w - 20.0
 	var board_w := maxf(260.0, side_x - 18.0)
@@ -445,6 +675,7 @@ func _layout() -> void:
 	board.position = Vector2(board_left + 43.0 * scale_value, board_top + 43.0 * scale_value)
 	side_panel.position = Vector2(side_x, 18.0)
 	side_panel.size = Vector2(side_w, maxf(170.0, sz.y - 36.0))
+	title_label.add_theme_font_size_override("font_size", 29)
 	title_label.position = Vector2(26.0, 9.0)
 	title_label.size = Vector2(board_w - 46.0, 40.0)
 	board_caption.position = Vector2(27.0, 48.0)
@@ -458,6 +689,100 @@ func _layout() -> void:
 	var dialog_size := Vector2(minf(640.0, sz.x - 65.0), minf(740.0, sz.y - 42.0))
 	rules_overlay.position = (sz - dialog_size) * 0.5
 	rules_overlay.size = dialog_size
+
+func _layout_portrait(sz: Vector2) -> void:
+	# Use screen WIDTH first: portrait phones deserve a full-width board.
+	# UI dimensions and fonts share a density factor so the browser cannot
+	# shrink 10px labels into unreadable text on high-resolution displays.
+	side_panel.visible = false
+	board_caption.visible = false
+	tip_label.visible = false
+	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_bar, mobile_action_bar, mobile_match_label]:
+		mobile_node.visible = true
+	var u := clampf(minf(sz.x / 430.0, sz.y / 780.0), 0.72, 2.5)
+	mobile_mobile_scale = u
+	var gutter := 7.0 * u
+	# Clear the camera cutout, rounded phone corners, and the browser top edge.
+	var safe_top := 28.0 * u
+	var title_h := 29.0 * u
+	var mode_h := 48.0 * u
+	var scores_h := 64.0 * u
+	var status_h := 52.0 * u
+	var power_h := 78.0 * u
+	var theme_h := 50.0 * u
+	var actions_h := 54.0 * u
+	var lower_gap := 6.0 * u
+	var min_bottom := 12.0 * u
+	# Unambiguous top-to-bottom order, each element within its own rectangle.
+	var y := safe_top
+	title_label.position = Vector2(gutter + 2.0 * u, y)
+	title_label.size = Vector2(sz.x * 0.48, title_h)
+	title_label.add_theme_font_size_override("font_size", maxi(22, int(round(29.0 * u))))
+	mobile_match_label.position = Vector2(sz.x * 0.53, y + 1.0 * u)
+	mobile_match_label.size = Vector2(sz.x * 0.45 - gutter, title_h)
+	mobile_match_label.add_theme_font_size_override("font_size", maxi(12, int(round(16.0 * u))))
+	y += title_h + 4.0 * u
+	mode_bar.position = Vector2(gutter, y)
+	mode_bar.size = Vector2(sz.x - gutter * 2.0, mode_h)
+	classic_button.custom_minimum_size.y = mode_h
+	duboo_button.custom_minimum_size.y = mode_h
+	classic_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
+	duboo_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
+	y += mode_h + lower_gap
+	mobile_score_panel.position = Vector2(gutter, y)
+	mobile_score_panel.size = Vector2(sz.x - gutter * 2.0, scores_h)
+	for heading in mobile_score_headings:
+		heading.add_theme_font_size_override("font_size", maxi(13, int(round(15.0 * u))))
+	mobile_you.add_theme_font_size_override("font_size", maxi(20, int(round(25.0 * u))))
+	mobile_cpu.add_theme_font_size_override("font_size", maxi(20, int(round(25.0 * u))))
+	mobile_queen.add_theme_font_size_override("font_size", maxi(14, int(round(17.0 * u))))
+	y += scores_h + lower_gap
+	# Keep the wooden/marble frame inside its own board rectangle.
+	# Only reduce board width on unusually short screens where controls would
+	# otherwise fall below the viewport; never shrink it to reserve empty space.
+	var controls_after := status_h + power_h + theme_h + actions_h + lower_gap * 4.0 + min_bottom
+	var board_width := minf(sz.x - 2.0 * gutter, sz.y - y - controls_after)
+	board_width = maxf(200.0 * u, board_width)
+	var scale_value := board_width / 766.0
+	var board_left := (sz.x - board_width) * 0.5
+	board.scale = Vector2.ONE * scale_value
+	board.position = Vector2(board_left + 43.0 * scale_value, y + 43.0 * scale_value)
+	y += board_width + lower_gap
+	mobile_status_panel.position = Vector2(gutter, y)
+	mobile_status_panel.size = Vector2(sz.x - gutter * 2.0, status_h)
+	mobile_status_title.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
+	mobile_status_hint.add_theme_font_size_override("font_size", maxi(13, int(round(16.0 * u))))
+	y += status_h + lower_gap
+	mobile_power_panel.position = Vector2(gutter, y)
+	mobile_power_panel.size = Vector2(sz.x - gutter * 2.0, power_h)
+	mobile_power_label.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
+	mobile_power_meter.custom_minimum_size.y = 14.0 * u
+	mobile_fire.custom_minimum_size = Vector2(157.0 * u, power_h - 10.0 * u)
+	mobile_fire.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
+	y += power_h + lower_gap
+	mobile_style_bar.position = Vector2(gutter, y)
+	mobile_style_bar.size = Vector2(sz.x - gutter * 2.0, theme_h)
+	mobile_style_prev.custom_minimum_size = Vector2(72.0 * u, theme_h)
+	mobile_style_next.custom_minimum_size = Vector2(72.0 * u, theme_h)
+	mobile_style_prev.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
+	mobile_style_next.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
+	mobile_style_name.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
+	y += theme_h + lower_gap
+	mobile_action_bar.position = Vector2(gutter, y)
+	mobile_action_bar.size = Vector2(sz.x - gutter * 2.0, actions_h)
+	mobile_cpu_select.custom_minimum_size = Vector2(125.0 * u, actions_h)
+	mobile_cpu_select.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
+	for b in [mobile_rules, mobile_restart, mobile_next]:
+		b.custom_minimum_size.y = actions_h
+		b.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
+	# Readable modal typography on touch as well.
+	var dialog_size := Vector2(sz.x - gutter * 2.0, minf(sz.y - safe_top - min_bottom, 740.0 * u))
+	rules_overlay.position = Vector2((sz.x - dialog_size.x) * 0.5, safe_top)
+	rules_overlay.size = dialog_size
+	rules_body.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
+	if rules_body != null and not rules_body.text.contains("PORTRAIT TOUCH CONTROLS"):
+		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nDrag along the lower baseline to place the striker. Drag elsewhere on the board to aim. Hold SHOOT to charge and release to fire. You can aim with another finger while charging."
+	_mobile_sync()
 
 func _load_board_style() -> void:
 	var config := ConfigFile.new()
@@ -495,11 +820,14 @@ func _cycle_board_style(step: int) -> void:
 		board_style_index = posmod(board_style_index + step, CarromBoard.STYLE_NAMES.size())
 		board.set_style(board_style_index)
 	_refresh_board_style_ui()
+	_mobile_sync()
 	_save_board_style()
 	if sound_click != null:
 		sound_click.play()
 
 func _new_match() -> void:
+	_cancel_mobile_charge()
+	mobile_board_finger = -1
 	board_number = 1
 	totals = [0, 0]
 	outstanding_dues = [0, 0]
@@ -538,6 +866,7 @@ func _begin_board() -> void:
 	board.charging = false
 	board.show_cpu_target = false
 	charge_time = 0.0
+	mobile_aim_target = _get_striker()["pos"] + Vector2.UP * 240.0
 	cpu_time = 0.75
 	if player_turn == 0:
 		_set_status("YOUR BREAK" if board_number == 1 else "YOUR TURN", "Move onto the bottom baseline and click to place your striker.")
@@ -575,6 +904,7 @@ func _set_status(title: String, message: String) -> void:
 		turn_head.text = title
 		turn_head.add_theme_color_override("font_color", MINT if player_turn == 0 else GOLD)
 		turn_desc.text = message
+	_mobile_sync()
 
 func _refresh_ui() -> void:
 	main_score_white.text = str(_pocketed_count("white")) if duboo_mode else str(totals[0])
@@ -593,6 +923,7 @@ func _refresh_ui() -> void:
 	power_meter.value = charge_power * 100.0 if phase == "charging" else 0.0
 	turn_head.text = status_title
 	turn_desc.text = status_text
+	_mobile_sync()
 
 func _screen_to_board() -> Vector2:
 	return board.to_local(get_global_mouse_position())
@@ -627,7 +958,136 @@ func _can_place_striker(point: Vector2) -> bool:
 			return false
 	return true
 
+func _mobile_board_point(global_point: Vector2) -> Vector2:
+	return board.to_local(global_point)
+
+func _mobile_is_baseline(point: Vector2) -> bool:
+	return point.x >= 90.0 and point.x <= 590.0 and absf(point.y - CarromBoard.base_y(0, duboo_mode)) < 66.0
+
+func _mobile_is_board(point: Vector2) -> bool:
+	return Rect2(-6.0, -6.0, 692.0, 692.0).has_point(point)
+
+func _mobile_start_board_drag(screen_point: Vector2) -> bool:
+	if player_turn != 0 or phase not in ["placement", "aim", "charging"]:
+		return false
+	var local := _mobile_board_point(screen_point)
+	if not _mobile_is_board(local):
+		return false
+	mobile_drag_baseline = _mobile_is_baseline(local) and phase != "charging"
+	if phase == "placement" and not mobile_drag_baseline:
+		# First place the striker at the visible baseline before aiming.
+		return false
+	_mobile_update_board_drag(screen_point)
+	return true
+
+func _mobile_update_board_drag(screen_point: Vector2) -> void:
+	if player_turn != 0 or phase not in ["placement", "aim", "charging"]:
+		return
+	var local := _mobile_board_point(screen_point)
+	if mobile_drag_baseline:
+		if _place_striker(0, local.x):
+			if phase == "placement":
+				phase = "aim"
+				board.show_aim = true
+				board.side = 0
+				mobile_aim_target = _get_striker()["pos"] + Vector2.UP * 220.0
+				sound_click.play()
+				_set_status("AIM YOUR SHOT", "Drag on the board to aim. Hold SHOOT and release to fire.")
+		else:
+			_set_status("BASELINE BLOCKED", "Try another point on the lower baseline.")
+	else:
+		mobile_aim_target = local
+		var diff: Vector2 = mobile_aim_target - _get_striker()["pos"]
+		if diff.length_squared() > 18.0 * 18.0:
+			aim_direction = diff.normalized()
+			board.aim_direction = aim_direction
+			board.queue_redraw()
+
+func _mobile_start_charge() -> void:
+	if player_turn != 0 or phase != "aim" or rules_overlay.visible:
+		return
+	phase = "charging"
+	charge_time = 0.0
+	charge_power = 0.20
+	board.charging = true
+	_mobile_fire_visual(true)
+	_mobile_sync()
+
+func _mobile_release_charge() -> void:
+	if phase == "charging" and player_turn == 0 and not rules_overlay.visible:
+		_mobile_fire_visual(false)
+		_shoot(aim_direction, charge_power)
+	else:
+		_mobile_fire_visual(false)
+
+func _mobile_handle_touch(event: InputEventScreenTouch) -> void:
+	mobile_ignore_synthetic_mouse = 0.65
+	if event.pressed:
+		if rules_overlay.visible:
+			return
+		if mobile_charge_finger < 0 and mobile_fire.get_global_rect().has_point(event.position):
+			if phase == "aim" and player_turn == 0:
+				mobile_charge_finger = event.index
+				_mobile_start_charge()
+				get_viewport().set_input_as_handled()
+			return
+		if mobile_board_finger < 0 and _mobile_start_board_drag(event.position):
+			mobile_board_finger = event.index
+			get_viewport().set_input_as_handled()
+	else:
+		if event.index == mobile_charge_finger:
+			mobile_charge_finger = -1
+			_mobile_release_charge()
+			get_viewport().set_input_as_handled()
+		elif event.index == mobile_board_finger:
+			mobile_board_finger = -1
+			get_viewport().set_input_as_handled()
+
+func _mobile_handle_mouse(event: InputEvent) -> void:
+	# Allows portrait testing with a real mouse in an editor/browser, but
+	# ignores the synthetic mouse events emitted by a physical touchscreen.
+	if mobile_ignore_synthetic_mouse > 0.0:
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			if rules_overlay.visible:
+				return
+			if mobile_fire.get_global_rect().has_point(event.position):
+				if phase == "aim":
+					mobile_mouse_charge = true
+					_mobile_start_charge()
+					get_viewport().set_input_as_handled()
+			elif _mobile_start_board_drag(event.position):
+				mobile_board_mouse_down = true
+				get_viewport().set_input_as_handled()
+		else:
+			if mobile_mouse_charge:
+				mobile_mouse_charge = false
+				_mobile_release_charge()
+				get_viewport().set_input_as_handled()
+			elif mobile_board_mouse_down:
+				mobile_board_mouse_down = false
+				get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion and mobile_board_mouse_down:
+		_mobile_update_board_drag(event.position)
+		get_viewport().set_input_as_handled()
+
+func _input(event: InputEvent) -> void:
+	if not portrait_touch:
+		return
+	if event is InputEventScreenTouch:
+		_mobile_handle_touch(event)
+	elif event is InputEventScreenDrag:
+		mobile_ignore_synthetic_mouse = 0.65
+		if event.index == mobile_board_finger:
+			_mobile_update_board_drag(event.position)
+			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton or event is InputEventMouseMotion:
+		_mobile_handle_mouse(event)
+
 func _unhandled_input(event: InputEvent) -> void:
+	if portrait_touch:
+		return
 	if rules_overlay.visible:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			rules_overlay.visible = false
@@ -664,10 +1124,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_refresh_ui()
 
 func _process(delta: float) -> void:
+	mobile_ignore_synthetic_mouse = maxf(0.0, mobile_ignore_synthetic_mouse - delta)
 	if rules_overlay != null and rules_overlay.visible:
 		return
 	if phase == "aim" or phase == "charging":
-		var mouse := _screen_to_board()
+		var mouse := mobile_aim_target if portrait_touch else _screen_to_board()
 		var diff: Vector2 = mouse - _get_striker()["pos"]
 		if diff.length() > 22.0:
 			aim_direction = diff.normalized()
@@ -678,9 +1139,12 @@ func _process(delta: float) -> void:
 			power_label.text = "SHOT POWER   %d%%" % int(round(charge_power * 100.0))
 			power_meter.value = charge_power * 100.0
 			board.charging = true
+			if portrait_touch:
+				mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0))
+				mobile_power_meter.value = charge_power * 100.0
 		board.aim_power = charge_power
 		board.queue_redraw()
-	elif phase == "placement":
+	elif phase == "placement" and not portrait_touch:
 		var mouse := _screen_to_board()
 		if _valid_baseline_click(mouse):
 			_place_striker(0, mouse.x)
@@ -708,6 +1172,9 @@ func _shoot(direction: Vector2, power: float) -> void:
 	if direction.length_squared() < 0.5:
 		return
 	phase = "moving"
+	mobile_charge_finger = -1
+	mobile_mouse_charge = false
+	_mobile_fire_visual(false)
 	var striker := _get_striker()
 	striker["vel"] = direction.normalized() * lerpf(_shot_speed_min(), _shot_speed_max(), clampf(power, 0.0, 1.0))
 	striker["pocketed"] = false
@@ -859,6 +1326,7 @@ func _resolve_shot() -> void:
 			result = "No piece of your color pocketed. Turn passes."
 	if player_turn == 0:
 		phase = "placement"
+		mobile_board_finger = -1
 		board.display_striker = true
 		board.side = 0
 		_place_striker(0, 340.0)
@@ -916,6 +1384,7 @@ func _next_board() -> void:
 	sound_click.play()
 
 func _open_rules() -> void:
+	_cancel_mobile_charge()
 	rules_overlay.visible = true
 	rules_overlay.move_to_front()
 	sound_click.play()

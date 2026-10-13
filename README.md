@@ -78,3 +78,34 @@ uses the four `duboo_*.wav` sounds. Collision and rail playback uses the stronge
 impact in a short window, avoiding excessive overlap during clustered shots.
 Two pocket voices allow quick double pockets without silencing the second drop.
 Sound detection is read-only and does not change any physical simulation.
+
+
+## Portrait touch controls (Classic and Duboo)
+
+Portrait screens up to 820 logical pixels wide use a dedicated vertical layout.
+Tap and drag horizontally on the lower baseline to place the striker, then
+drag elsewhere on the board to choose a direction. Hold the **HOLD TO SHOOT**
+button to charge and release to strike. The other finger can still aim while
+the power button is held. On landscape screens the original mouse controls
+and sidebar remain unchanged.
+
+The mobile HUD includes scores/Queen, shot status, power meter, a board/table
+selector, CPU skill, rules, and restart/next-board actions. No new abilities,
+rules, physics, or SFX have been added.
+
+
+## Portrait touch layout (Classic and Duboo)
+
+Portrait mode uses a separate phone UI. The wood/marble frame is scaled to the
+full device width whenever vertical space allows. A reserved safe-area gutter
+above the title keeps the header clear of camera cutouts and rounded corners.
+Score, Queen, turn status, charge bar, table selector and buttons are laid out
+in their own non-overlapping bands below/above the game board. The typography
+and touch targets respond to the logical viewport size, avoiding tiny text on
+high-resolution phones.
+
+Touch: drag along the lower baseline to place the striker, drag elsewhere to
+aim, then hold **HOLD TO SHOOT** and release to fire. A second finger can aim
+while charging. Both game modes use identical touch controls.
+
+Landscape continues to use the original desktop layout and mouse controls.
