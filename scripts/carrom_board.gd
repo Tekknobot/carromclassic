@@ -55,25 +55,87 @@ var aim_power: float = 0.38
 var charging := false
 var cpu_target := Vector2.ZERO
 var show_cpu_target := false
+var duboo_mode := false
 
 func _ready() -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	if style_index == 0:
+	if duboo_mode:
+		_draw_duboo_board()
+	elif style_index == 0:
 		_draw_classic_board()
 	else:
 		_draw_alternate_board()
 	# Subtle highlight of active player's placement zone.
 	if display_striker:
-		var baseline_y := base_y(side)
-		var ac := (Color("#68e9ed") if side == 0 else Color("#f4ad7b")) if style_index == 7 else (GLOW if side == 0 else Color("#e3b87d"))
-		draw_line(Vector2(132, baseline_y), Vector2(548, baseline_y), Color(ac, 0.34), 5.0, true)
-		draw_line(Vector2(132, baseline_y), Vector2(548, baseline_y), Color(ac, 0.92), 1.6, true)
-		for end_x in [132.0, 548.0]:
+		var baseline_y := base_y(side, duboo_mode)
+		var ac := (Color("#cde8de") if side == 0 else Color("#d9b993")) if duboo_mode else ((Color("#68e9ed") if side == 0 else Color("#f4ad7b")) if style_index == 7 else (GLOW if side == 0 else Color("#e3b87d")))
+		var zone_left := 112.0 if duboo_mode else 132.0
+		var zone_right := 568.0 if duboo_mode else 548.0
+		draw_line(Vector2(zone_left, baseline_y), Vector2(zone_right, baseline_y), Color(ac, 0.21), 5.0, true)
+		draw_line(Vector2(zone_left, baseline_y), Vector2(zone_right, baseline_y), Color(ac, 0.80), 1.5, true)
+		for end_x in [zone_left, zone_right]:
 			draw_circle(Vector2(end_x, baseline_y), 3.0, ac, true, -1.0, true)
 	_draw_discs()
 	_draw_aim()
+
+
+func _draw_duboo_board() -> void:
+	# Karachi-inspired slate / marble club table. Unlike Classic, the markings
+	# are small relative to the expansive surface; counters and ring are scaled
+	# separately by the Duboo physics profile.
+	var slate := Color("#314b47")
+	var white_line := Color("#cad9d0")
+	var gold := Color("#a98664")
+	# Thick dark wood table frame and bevel; playing geometry stays inside 680.
+	draw_rect(Rect2(-43, -43, 766, 766), Color("#1d1615"))
+	draw_rect(Rect2(-39, -39, 758, 758), Color("#72503c"))
+	draw_rect(Rect2(-33, -33, 746, 746), Color("#ba8c62"))
+	draw_rect(Rect2(-27, -27, 734, 734), Color("#2e2320"))
+	draw_rect(Rect2(-19, -19, 718, 718), Color("#182824"))
+	draw_rect(Rect2(-9, -9, 698, 698), Color("#516960"))
+	draw_rect(Rect2(0, 0, S, S), slate)
+	# Marble mottling and very fine veins, deterministic for web playback.
+	for k in range(85):
+		var yy: float = float((k * 179 + 49) % 672) + 3.0
+		var xx: float = float((k * 107 + 63) % 475) - 60.0
+		var span: float = 135.0 + float(k % 5) * 48.0
+		var strand := PackedVector2Array()
+		for n in range(8):
+			var t := float(n) / 7.0
+			strand.append(Vector2(clampf(xx + span * t, 1.0, S - 1.0), clampf(yy + 9.0 * sin(6.0 * t + float(k)), 1.0, S - 1.0)))
+		draw_polyline(strand, Color("#d7e6dc", 0.018 if k % 4 else 0.044), 0.75, true)
+	for k in range(8):
+		var glint_y := 23.0 + float(k) * 89.0
+		draw_line(Vector2(14.0, glint_y), Vector2(665.0, glint_y + 8.0), Color("#afcac0", 0.015), 9.0, true)
+	# Compact centre diagram (the older Duboo patch used Classic's giant circle).
+	var c := Vector2(340.0, 340.0)
+	draw_arc(c, 51.0, 0.0, TAU, 100, Color(white_line, 0.72), 1.7, true)
+	draw_arc(c, 9.0, 0.0, TAU, 36, Color(white_line, 0.72), 1.4, true)
+	draw_line(c + Vector2(-62, 0), c + Vector2(62, 0), Color(white_line, 0.37), 1.0, true)
+	draw_line(c + Vector2(0, -62), c + Vector2(0, 62), Color(white_line, 0.37), 1.0, true)
+	# Double starting lines near each cushion; much closer to the edge than Classic.
+	for face in range(4):
+		var y1 := 612.0
+		var y2 := 628.0
+		var x1 := 108.0
+		var x2 := 572.0
+		var left_a := _rotate_board(Vector2(x1, y1), face)
+		var right_a := _rotate_board(Vector2(x2, y1), face)
+		var left_b := _rotate_board(Vector2(x1, y2), face)
+		var right_b := _rotate_board(Vector2(x2, y2), face)
+		draw_line(left_a, right_a, Color(white_line, 0.68), 1.65, true)
+		draw_line(left_b, right_b, Color(white_line, 0.68), 1.65, true)
+		for endpoint in [x1, x2]:
+			var ep := _rotate_board(Vector2(endpoint, 620.0), face)
+			draw_arc(ep, 8.3, 0.0, TAU, 36, Color(white_line, 0.72), 1.5, true)
+	# The pocket mouths are visibly smaller than the giant ring striker.
+	for pocket in CarromPhysics.POCKETS:
+		draw_circle(pocket, 21.0, Color("#796b58"))
+		draw_circle(pocket, 18.0, Color("#28342f"))
+		draw_circle(pocket, CarromPhysics.DUBOO_POCKET_RADIUS + 0.2, Color("#071314"))
+		draw_arc(pocket, 20.0, 0.18, PI * 1.4, 44, Color(gold, 0.64), 1.15, true)
 
 func _draw_classic_board() -> void:
 	# Cast-shadow, solid wood frame, inner inset and warm playing veneer.
@@ -290,7 +352,9 @@ func _rotate_board(p: Vector2, quarter_turns: int) -> Vector2:
 func _draw_side_line(a: Vector2, b: Vector2, face: int) -> void:
 	draw_line(_rotate_board(a, face), _rotate_board(b, face), _ink(), 2.0, true)
 
-static func base_y(who: int) -> float:
+static func base_y(who: int, duboo: bool = false) -> float:
+	if duboo:
+		return 620.0 if who == 0 else 60.0
 	return 573.5 if who == 0 else 106.5
 
 func _draw_discs() -> void:
@@ -300,7 +364,8 @@ func _draw_discs() -> void:
 		var pos: Vector2 = disc["pos"]
 		var rad: float = disc["radius"]
 		var kind: String = disc["kind"]
-		draw_circle(pos + Vector2(2.0, 3.3), rad + 0.5, Color(0, 0, 0, 0.2), true, -1, true)
+		if not (duboo_mode and kind == "striker"):
+			draw_circle(pos + Vector2(2.0, 3.3), rad + 0.5, Color(0, 0, 0, 0.2), true, -1, true)
 		var fill := CREAM
 		var outer := Color("#a39b84")
 		var ornament := Color("#beb098")
@@ -316,20 +381,46 @@ func _draw_discs() -> void:
 			fill = Color("#f9e8c5")
 			outer = Color("#3c655f")
 			ornament = Color("#28897e")
+		if duboo_mode:
+			if kind == "striker":
+				# Thick, TRANSPARENT, open-centred magenta acrylic sliding ring,
+				# not an ivory solid striker with circles painted on its face.
+				var mid := (rad + CarromPhysics.DUBOO_RING_INNER_RADIUS) * 0.5
+				var band := rad - CarromPhysics.DUBOO_RING_INNER_RADIUS
+				draw_arc(pos + Vector2(1.3, 2.2), mid, 0, TAU, 96, Color(0.0, 0.0, 0.0, 0.34), band + 2.7, true)
+				draw_arc(pos, mid, 0, TAU, 96, Color("#5a284b"), band + 0.9, true)
+				draw_arc(pos, mid, 0, TAU, 96, Color("#be61a7", 0.94), band - 1.3, true)
+				draw_arc(pos, rad - 1.3, 0, TAU, 96, Color("#f5c1e5", 0.85), 1.6, true)
+				draw_arc(pos, CarromPhysics.DUBOO_RING_INNER_RADIUS + 0.8, 0, TAU, 96, Color("#f4d6e8", 0.84), 1.5, true)
+				draw_arc(pos, mid, -PI * 0.75, -PI * 0.15, 40, Color("#fff5fa", 0.50), 2.1, true)
+				continue
+			# Small polished white / dark / red counters against the dark stone.
+			if kind == "white":
+				fill = Color("#f4e9c9")
+				outer = Color("#bbaa8c")
+				ornament = Color("#d9d0b8")
+			elif kind == "black":
+				fill = Color("#222c2b")
+				outer = Color("#0d1517")
+				ornament = Color("#7b9290")
+			else:
+				fill = Color("#c4423a")
+				outer = Color("#6d2525")
+				ornament = Color("#e6a78b")
 		# Black carrommen need an extra contrasting silhouette on dark skins.
-		if style_index in [1, 5, 7] and kind == "black":
+		if not duboo_mode and style_index in [1, 5, 7] and kind == "black":
 			draw_circle(pos, rad + 1.9, Color("#c6b895") if style_index != 7 else Color("#7fdbe7"), true, -1, true)
 		draw_circle(pos, rad, outer, true, -1, true)
 		draw_circle(pos + Vector2(-0.75, -0.8), rad - 2.0, fill, true, -1, true)
-		draw_arc(pos, rad - 4.3, 0.0, TAU, 40, ornament, 1.25, true)
+		draw_arc(pos, maxf(2.6, rad - 4.3), 0.0, TAU, 40, ornament, 1.0 if duboo_mode else 1.25, true)
 		if kind == "striker":
 			draw_arc(pos, rad - 8.6, 0.0, TAU, 40, ornament, 2.0, true)
 			draw_circle(pos, 3.9, ornament, true, -1, true)
 		elif kind == "queen":
-			draw_circle(pos, 3.6, Color("#ffce8e"), true, -1, true)
+			draw_circle(pos, 2.1 if duboo_mode else 3.6, Color("#ffce8e"), true, -1, true)
 		else:
-			draw_circle(pos, 2.3, ornament, true, -1, true)
-			draw_circle(pos + Vector2(-rad * 0.34, -rad * 0.45), 2.4, Color(1, 1, 1, 0.2), true, -1, true)
+			draw_circle(pos, 1.6 if duboo_mode else 2.3, ornament, true, -1, true)
+			draw_circle(pos + Vector2(-rad * 0.34, -rad * 0.45), 1.3 if duboo_mode else 2.4, Color(1, 1, 1, 0.2), true, -1, true)
 
 func _draw_aim() -> void:
 	if not show_aim:
@@ -345,20 +436,20 @@ func _draw_aim() -> void:
 	var dir: Vector2 = aim_direction.normalized()
 	if dir.length_squared() < 0.5:
 		return
-	var color := (Color("#79f2f1") if side == 0 else Color("#ffb479")) if style_index == 7 else (Color("#60cbb4") if side == 0 else Color("#edb36c"))
+	var color := (Color("#366e64") if side == 0 else Color("#9c724c")) if duboo_mode else ((Color("#79f2f1") if side == 0 else Color("#ffb479")) if style_index == 7 else (Color("#60cbb4") if side == 0 else Color("#edb36c")))
 	var cast_len: float = 130.0 + aim_power * 245.0
 	var end: Vector2 = start + dir * cast_len
 	# Dashed aim ray, readable against either light or dark pieces.
 	for i in range(int(cast_len / 15.0)):
-		var one := start + dir * (27.0 + float(i) * 15.0)
+		var one := start + dir * ((CarromPhysics.DUBOO_STRIKER_RADIUS + 6.0 if duboo_mode else 27.0) + float(i) * 15.0)
 		if one.distance_to(start) > cast_len:
 			break
 		draw_line(one, one + dir * 8.0, Color(color, 0.86), 2.5, true)
-	draw_arc(start, 28.0, 0, TAU, 50, Color(color, 0.5), 1.8, true)
+	draw_arc(start, CarromPhysics.DUBOO_STRIKER_RADIUS + 4.0 if duboo_mode else 28.0, 0, TAU, 50, Color(color, 0.5), 1.8, true)
 	var tip := end - dir * 5.0
 	var wing := dir.orthogonal() * 8.0
 	draw_colored_polygon(PackedVector2Array([tip + dir * 15.0, tip - dir * 4.0 + wing, tip - dir * 4.0 - wing]), color)
 	if charging:
-		draw_arc(start, 28.0, -PI / 2.0, -PI / 2.0 + TAU * aim_power, 60, color, 5.0, true)
+		draw_arc(start, CarromPhysics.DUBOO_STRIKER_RADIUS + 4.0 if duboo_mode else 28.0, -PI / 2.0, -PI / 2.0 + TAU * aim_power, 60, color, 5.0, true)
 	if show_cpu_target:
 		draw_arc(cpu_target, 24.0, 0, TAU, 48, Color(color, 0.43), 1.5, true)

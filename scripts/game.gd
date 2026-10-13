@@ -17,7 +17,16 @@ const MAX_BOARD_COUNT := 8
 const MATCH_TARGET := 25
 const MIN_SHOT_SPEED := 320.0
 const MAX_SHOT_SPEED := 1425.0
+const DUBOO_MIN_SHOT_SPEED := 250.0
+const DUBOO_MAX_SHOT_SPEED := 1080.0
 
+var duboo_mode := false
+var mode_bar: HBoxContainer
+var classic_button: Button
+var duboo_button: Button
+var style_heading: Label
+var style_selector: HBoxContainer
+var rules_body: Label
 var board: CarromBoard
 var discs: Array = []
 var player_turn := 0
@@ -74,6 +83,7 @@ func _ready() -> void:
 	add_child(board)
 	board.set_style(board_style_index)
 	_build_ui()
+	_refresh_mode_ui()
 	_build_audio()
 	_refresh_board_style_ui()
 	_new_match()
@@ -157,6 +167,13 @@ func _build_ui() -> void:
 	title_label = _label(self, "CARROM", 29, TEXT)
 	board_caption = _label(self, "CLASSIC BOARD  /  SINGLE PLAYER", 12, MUTED)
 	tip_label = _label(self, "MOUSE   PLACE  /  AIM  /  HOLD TO POWER  /  RELEASE", 12, MUTED, true)
+	mode_bar = HBoxContainer.new()
+	mode_bar.add_theme_constant_override("separation", 8)
+	add_child(mode_bar)
+	classic_button = _make_button(mode_bar, "CLASSIC")
+	duboo_button = _make_button(mode_bar, "DUBOO")
+	classic_button.pressed.connect(func() -> void: _set_mode(false))
+	duboo_button.pressed.connect(func() -> void: _set_mode(true))
 	side_panel = PanelContainer.new()
 	side_panel.add_theme_stylebox_override("panel", _style(PANEL, Color("#3c5b51"), 16))
 	add_child(side_panel)
@@ -178,8 +195,9 @@ func _build_ui() -> void:
 	match_info = _label(content, "BOARD 1 OF 8   |   FIRST TO 25", 14, TEXT)
 	# A dedicated cosmetic selector: usable during every phase of the match.
 	# "NEXT" wraps from theme 8 back to the untouched original theme 1.
-	_label(content, "BOARD APPEARANCE", 11, MINT)
+	style_heading = _label(content, "BOARD APPEARANCE", 11, MINT)
 	var board_style_row := HBoxContainer.new()
+	style_selector = board_style_row
 	board_style_row.add_theme_constant_override("separation", 7)
 	content.add_child(board_style_row)
 	board_style_prev = _make_button(board_style_row, "PREV")
@@ -254,8 +272,7 @@ func _build_ui() -> void:
 	cpu_selector.add_theme_stylebox_override("hover", _style(Color("#345a4e"), Color.TRANSPARENT, 9))
 	cpu_selector.item_selected.connect(func(idx: int) -> void: cpu_skill = idx)
 	content.add_child(cpu_selector)
-	_label(content, "HOW TO PLAY", 11, MINT)
-	_label(content, "1  Click the glowing baseline to place.\n2  Point the cursor to aim.\n3  Hold left mouse to charge. Release to shoot.\n4  Pocket WHITE. CPU plays BLACK.", 13, TEXT, true)
+	# One concise controls reminder belongs below the board, not in the sidebar.
 	var bottom_buttons := HBoxContainer.new()
 	bottom_buttons.add_theme_constant_override("separation", 10)
 	content.add_child(bottom_buttons)
@@ -302,31 +319,80 @@ func _build_rules_overlay() -> void:
 	v.add_theme_constant_override("separation", 12)
 	scroll.add_child(v)
 	_label(v, "CARROM  /  QUICK RULES", 23, MINT)
-	_label(v,
+	rules_body = _label(v,
 		"OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nWhite breaks. You keep shooting whenever you pocket at least one of your own pieces; otherwise the turn passes. Opponent pieces remain pocketed if you sink them.\n\nTHE QUEEN\nYou must pocket one of your own pieces before you can claim the Queen. Pocket the Queen and one of your own pieces in the same shot, or pocket your own piece on your very next shot to cover it. An uncovered Queen returns to the center. If you capture the Queen together with your very first piece, a further cover is required.\n\nSTRIKER FOUL\nPocketing the striker costs one of your previously pocketed pieces (or incurs one owed piece if none is available), and ends your turn.\n\nSCORING\nThe board winner scores one point for each opponent piece left on the board. The Queen adds three points if secured by the winner, or one when their pre-board match score is at least 22. First to 25 points or the leader after eight boards wins.\n\nThis is a playable standard-rules adaptation: specialist referee calls and uncommon compound fouls are simplified.",
 		14, TEXT, true)
 	var close := _make_button(v, "RETURN TO BOARD", true)
 	close.pressed.connect(func() -> void: rules_overlay.visible = false)
 
+func _set_mode(use_duboo: bool) -> void:
+	if duboo_mode == use_duboo:
+		return
+	duboo_mode = use_duboo
+	board.duboo_mode = duboo_mode
+	_refresh_mode_ui()
+	_new_match()
+	if sound_click != null:
+		sound_click.play()
+
+func _refresh_mode_ui() -> void:
+	if board == null or classic_button == null:
+		return
+	board.duboo_mode = duboo_mode
+	for b in [classic_button, duboo_button]:
+		var selected = (b == duboo_button) if duboo_mode else (b == classic_button)
+		b.add_theme_stylebox_override("normal", _style(MINT if selected else PANEL_ALT, Color.TRANSPARENT, 9))
+		b.add_theme_color_override("font_color", INK if selected else TEXT)
+		b.add_theme_color_override("font_hover_color", INK if selected else TEXT)
+		b.add_theme_color_override("font_pressed_color", INK if selected else TEXT)
+	style_heading.visible = not duboo_mode
+	style_selector.visible = not duboo_mode
+	restart_button.text = "NEW BOARD" if duboo_mode else "NEW MATCH"
+	if rules_body != null:
+		if duboo_mode:
+			rules_body.text = "DUBOO - KARACHI-INSPIRED\nPlay a single board on a large slate/marble-style table with smaller counters, compact markings, and an oversize open-centred acrylic ring. The ring is much larger than the pocket and cannot fall into it. The physics are gameplay approximations.\n\nPLAY\nClick the bottom baseline to position the ring. Aim, hold left mouse to charge, then release. The controls are identical to Classic.\n\nOBJECTIVE\nPocket all nine of your colour and legally secure the Queen. Pocket your colour to shoot again. CPU plays black.\n\nQUEEN AND FOULS\nQueen and cover rules follow this game's existing adaptation. A ring-pocket foul is impossible because the ring cannot fit a hole.\n\nMATCH\nA single completed board determines the winner. Select NEW BOARD to restart."
+		else:
+			rules_body.text = "OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nYou keep shooting whenever you pocket your color; otherwise the turn passes.\n\nTHE QUEEN\nYou must first pocket a piece of your color. Pocket the Queen and another piece in the same shot or cover it on your next shot. If not covered, she returns to the center.\n\nSTRIKER FOUL\nPocketing the striker costs one of your pocketed pieces, or creates an owed piece, and ends the turn.\n\nSCORING\nFirst to 25 points or the leader after eight boards wins. Uncommon compound fouls are simplified."
+	_refresh_board_style_ui()
+	board.queue_redraw()
+
+func _shot_speed_min() -> float:
+	return DUBOO_MIN_SHOT_SPEED if duboo_mode else MIN_SHOT_SPEED
+
+func _shot_speed_max() -> float:
+	return DUBOO_MAX_SHOT_SPEED if duboo_mode else MAX_SHOT_SPEED
+
 func _layout() -> void:
 	if board == null or side_panel == null:
 		return
 	var sz := size
-	var side_w := clampf(sz.x * 0.315, 358.0, 468.0)
-	var side_x := sz.x - side_w - 24.0
-	var board_w := side_x - 30.0
-	var scale_value := clampf(minf((board_w - 56.0) / 766.0, (sz.y - 134.0) / 766.0), 0.48, 1.22)
+	var side_w := minf(clampf(sz.x * 0.315, 332.0, 452.0), maxf(280.0, sz.x * 0.42))
+	var side_x := sz.x - side_w - 20.0
+	var board_w := maxf(260.0, side_x - 18.0)
+	# Layout includes the FULL 766 px wooden/marble frame (-43 to 723),
+	# never just the 680 px playing field. Keep a real top and bottom gutter.
+	var top_guard := 145.0
+	var bottom_guard := sz.y - 50.0
+	var allowed_h := maxf(220.0, bottom_guard - top_guard)
+	var allowed_w := maxf(230.0, board_w - 28.0)
+	var scale_value := maxf(0.25, minf(1.15, minf(allowed_w / 766.0, allowed_h / 766.0)))
 	board.scale = Vector2.ONE * scale_value
-	board.position = Vector2(board_w * 0.5 - 340.0 * scale_value, sz.y * 0.51 - 340.0 * scale_value)
-	side_panel.position = Vector2(side_x, 22.0)
-	side_panel.size = Vector2(side_w, sz.y - 44.0)
-	title_label.position = Vector2(32.0, 11.0)
-	title_label.size = Vector2(board_w - 50, 42)
-	board_caption.position = Vector2(34.0, 53.0)
-	board_caption.size = Vector2(board_w - 50, 20)
-	tip_label.position = Vector2(35.0, sz.y - 41.0)
-	tip_label.size = Vector2(board_w - 50, 30)
-	var dialog_size := Vector2(minf(640, sz.x - 80), minf(790, sz.y - 50))
+	var board_top := top_guard + (allowed_h - 766.0 * scale_value) * 0.5
+	var board_left := (board_w - 766.0 * scale_value) * 0.5
+	board.position = Vector2(board_left + 43.0 * scale_value, board_top + 43.0 * scale_value)
+	side_panel.position = Vector2(side_x, 18.0)
+	side_panel.size = Vector2(side_w, maxf(170.0, sz.y - 36.0))
+	title_label.position = Vector2(26.0, 9.0)
+	title_label.size = Vector2(board_w - 46.0, 40.0)
+	board_caption.position = Vector2(27.0, 48.0)
+	board_caption.size = Vector2(board_w - 45.0, 20.0)
+	mode_bar.position = Vector2(27.0, 84.0)
+	mode_bar.size = Vector2(minf(335.0, board_w - 46.0), 43.0)
+	classic_button.custom_minimum_size = Vector2(0, 41)
+	duboo_button.custom_minimum_size = Vector2(0, 41)
+	tip_label.position = Vector2(27.0, sz.y - 35.0)
+	tip_label.size = Vector2(board_w - 45.0, 29.0)
+	var dialog_size := Vector2(minf(640.0, sz.x - 65.0), minf(740.0, sz.y - 42.0))
 	rules_overlay.position = (sz - dialog_size) * 0.5
 	rules_overlay.size = dialog_size
 
@@ -344,7 +410,7 @@ func _refresh_board_style_ui() -> void:
 	if board_style_label != null:
 		board_style_label.text = "%02d / 08\n%s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]]
 	if board_caption != null:
-		board_caption.text = "STYLE %02d / 08  /  %s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]]
+		board_caption.text = "DUBOO  /  SLATE TABLE  /  OVERSIZE OPEN RING" if duboo_mode else ("STYLE %02d / 08  /  %s" % [board_style_index + 1, CarromBoard.STYLE_NAMES[board_style_index]])
 
 func _cycle_board_style(step: int) -> void:
 	board_style_index = posmod(board_style_index + step, CarromBoard.STYLE_NAMES.size())
@@ -376,13 +442,13 @@ func _begin_board() -> void:
 	# Six inner + twelve outer carrommen; 9 white and 9 black.
 	for ring in range(2):
 		var count := 6 if ring == 0 else 12
-		var radius := 29.0 if ring == 0 else 57.0
+		var radius := (19.0 if ring == 0 else 37.8) if duboo_mode else (29.0 if ring == 0 else 57.0)
 		for k in range(count):
 			var angle := -PI / 2.0 + float(k) * TAU / float(count)
 			var kind := "white" if k % 2 == 0 else "black"
 			_add_disc(kind, Vector2(340, 340) + Vector2.from_angle(angle) * radius, index)
 			index += 1
-	_add_disc("striker", Vector2(340, 573.5), 100)
+	_add_disc("striker", Vector2(340, CarromBoard.base_y(0, duboo_mode)), 100)
 	player_turn = 0 if board_number % 2 == 1 else 1
 	phase = "placement" if player_turn == 0 else "cpu_think"
 	board.discs = discs
@@ -402,7 +468,7 @@ func _begin_board() -> void:
 	board.queue_redraw()
 
 func _add_disc(kind: String, at: Vector2, id_number: int) -> void:
-	discs.append({"id": id_number, "kind": kind, "pos": at, "vel": Vector2.ZERO, "radius": PHYSICS.radius_for(kind), "mass": PHYSICS.coin_mass(kind), "pocketed": false})
+	discs.append({"id": id_number, "kind": kind, "pos": at, "vel": Vector2.ZERO, "radius": PHYSICS.radius_for(kind, duboo_mode), "mass": PHYSICS.coin_mass(kind, duboo_mode), "pocketed": false})
 
 func _get_striker() -> Dictionary:
 	return discs[discs.size() - 1]
@@ -432,11 +498,11 @@ func _set_status(title: String, message: String) -> void:
 		turn_desc.text = message
 
 func _refresh_ui() -> void:
-	main_score_white.text = str(totals[0])
-	main_score_black.text = str(totals[1])
-	coins_white.text = "%d / 9 pocketed" % _pocketed_count("white")
-	coins_black.text = "%d / 9 pocketed" % _pocketed_count("black")
-	match_info.text = "BOARD %d OF %d    |    FIRST TO %d" % [board_number, MAX_BOARD_COUNT, MATCH_TARGET]
+	main_score_white.text = str(_pocketed_count("white")) if duboo_mode else str(totals[0])
+	main_score_black.text = str(_pocketed_count("black")) if duboo_mode else str(totals[1])
+	coins_white.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("white")
+	coins_black.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("black")
+	match_info.text = "DUBOO   /   ONE BOARD" if duboo_mode else ("BOARD %d OF %d    |    FIRST TO %d" % [board_number, MAX_BOARD_COUNT, MATCH_TARGET])
 	if pending_queen != -1:
 		queen_text.text = "  QUEEN  /  %s MUST COVER" % ("YOU" if pending_queen == 0 else "CPU")
 	elif queen_owner != -1:
@@ -453,16 +519,16 @@ func _screen_to_board() -> Vector2:
 	return board.to_local(get_global_mouse_position())
 
 func _valid_baseline_click(point: Vector2) -> bool:
-	return point.x >= 106.0 and point.x <= 574.0 and absf(point.y - CarromBoard.base_y(0)) < 40.0
+	return point.x >= 100.0 and point.x <= 580.0 and absf(point.y - CarromBoard.base_y(0, duboo_mode)) < (32.0 if duboo_mode else 40.0)
 
 func _place_striker(player: int, desired_x: float) -> bool:
 	var striker := _get_striker()
-	var y := CarromBoard.base_y(player)
-	var x := clampf(desired_x, 125.0, 555.0)
+	var y := CarromBoard.base_y(player, duboo_mode)
+	var x := clampf(desired_x, 111.0 if duboo_mode else 125.0, 569.0 if duboo_mode else 555.0)
 	var candidates: Array[float] = [x]
 	for i in range(1, 53):
-		candidates.append(clampf(x + float(i) * 7.5, 125.0, 555.0))
-		candidates.append(clampf(x - float(i) * 7.5, 125.0, 555.0))
+		candidates.append(clampf(x + float(i) * 7.5, 111.0 if duboo_mode else 125.0, 569.0 if duboo_mode else 555.0))
+		candidates.append(clampf(x - float(i) * 7.5, 111.0 if duboo_mode else 125.0, 569.0 if duboo_mode else 555.0))
 	for test_x in candidates:
 		var sample := Vector2(test_x, y)
 		if _can_place_striker(sample):
@@ -478,7 +544,7 @@ func _can_place_striker(point: Vector2) -> bool:
 	for other in discs:
 		if other["kind"] == "striker" or other["pocketed"]:
 			continue
-		if point.distance_squared_to(other["pos"]) < pow(PHYSICS.STRIKER_RADIUS + other["radius"] + 2.5, 2):
+		if point.distance_squared_to(other["pos"]) < pow(PHYSICS.radius_for("striker", duboo_mode) + other["radius"] + 2.5, 2):
 			return false
 	return true
 
@@ -545,7 +611,7 @@ func _process(delta: float) -> void:
 			cpu_queued_shot = _choose_cpu_shot()
 			_place_striker(1, cpu_queued_shot["x"])
 			board.aim_direction = cpu_queued_shot["dir"]
-			board.aim_power = inverse_lerp(MIN_SHOT_SPEED, MAX_SHOT_SPEED, cpu_queued_shot["speed"])
+			board.aim_power = inverse_lerp(_shot_speed_min(), _shot_speed_max(), cpu_queued_shot["speed"])
 			board.show_aim = true
 			board.show_cpu_target = true
 			board.cpu_target = cpu_queued_shot["target"]
@@ -557,14 +623,14 @@ func _process(delta: float) -> void:
 	elif phase == "cpu_aim":
 		cpu_time -= delta
 		if cpu_time <= 0.0:
-			_shoot(cpu_queued_shot["dir"], inverse_lerp(MIN_SHOT_SPEED, MAX_SHOT_SPEED, cpu_queued_shot["speed"]))
+			_shoot(cpu_queued_shot["dir"], inverse_lerp(_shot_speed_min(), _shot_speed_max(), cpu_queued_shot["speed"]))
 
 func _shoot(direction: Vector2, power: float) -> void:
 	if direction.length_squared() < 0.5:
 		return
 	phase = "moving"
 	var striker := _get_striker()
-	striker["vel"] = direction.normalized() * lerpf(MIN_SHOT_SPEED, MAX_SHOT_SPEED, clampf(power, 0.0, 1.0))
+	striker["vel"] = direction.normalized() * lerpf(_shot_speed_min(), _shot_speed_max(), clampf(power, 0.0, 1.0))
 	striker["pocketed"] = false
 	own_count_before = _pocketed_count(_kind_for(player_turn))
 	shot_duration = 0.0
@@ -584,14 +650,16 @@ func _physics_process(delta: float) -> void:
 	if phase != "moving":
 		return
 	shot_duration += delta
-	for _substep in range(2):
-		var fallen: Array[int] = PHYSICS.advance(discs, delta * 0.5)
+	# Four small substeps stabilize grazing impacts on the faster marble table.
+	var substeps := 4 if duboo_mode else 2
+	for _substep in range(substeps):
+		var fallen: Array[int] = PHYSICS.advance(discs, delta / float(substeps), duboo_mode)
 		for piece_id in fallen:
 			last_shot_pockets.append(piece_id)
 			if not sound_pocket.playing:
 				sound_pocket.play()
 	board.queue_redraw()
-	if (shot_duration > 0.35 and PHYSICS.is_still(discs)) or shot_duration >= 12.0:
+	if (shot_duration > 0.35 and PHYSICS.is_still(discs)) or shot_duration >= (18.0 if duboo_mode else 12.0):
 		for d in discs:
 			d["vel"] = Vector2.ZERO
 		_resolve_shot()
@@ -721,6 +789,14 @@ func _resolve_shot() -> void:
 
 func _end_board(board_winner: int, reason: String) -> void:
 	winner = board_winner
+	if duboo_mode:
+		phase = "match_over"
+		board.display_striker = false
+		board.show_aim = false
+		_set_status("YOU WIN DUBOO!" if board_winner == 0 else "CPU WINS DUBOO", reason + "  Select NEW BOARD to play again.")
+		_refresh_ui()
+		board.queue_redraw()
+		return
 	var opponent_left := 9 - _pocketed_count(_kind_for(1 - board_winner))
 	var gain := maxi(1, opponent_left)
 	if queen_owner == board_winner:
@@ -764,7 +840,7 @@ func _open_rules() -> void:
 # physics and power range as the human (it does not teleport pieces).
 func _choose_cpu_shot() -> Dictionary:
 	var best_score := -1.0e10
-	var best := {"x": 340.0, "dir": Vector2.DOWN, "speed": 1000.0, "target": Vector2(340, 340)}
+	var best := {"x": 340.0, "dir": Vector2.DOWN, "speed": 850.0 if duboo_mode else 1000.0, "target": Vector2(340, 340)}
 	var pockets: Array[Vector2] = PHYSICS.POCKETS
 	for piece in discs:
 		if piece["pocketed"]:
@@ -774,11 +850,11 @@ func _choose_cpu_shot() -> Dictionary:
 		var target: Vector2 = piece["pos"]
 		for pocket in pockets:
 			var exit_dir: Vector2 = (pocket - target).normalized()
-			var ghost: Vector2 = target - exit_dir * (PHYSICS.STRIKER_RADIUS + piece["radius"] + 0.7)
+			var ghost: Vector2 = target - exit_dir * (PHYSICS.radius_for("striker", duboo_mode) + piece["radius"] + 0.7)
 			var pocket_open := _segment_is_clear(target, pocket, piece["radius"] * 1.9, piece["id"])
 			for n in range(16):
-				var x := 127.0 + float(n) * 28.3
-				var initial := Vector2(x, CarromBoard.base_y(1))
+				var x := (114.0 + float(n) * 30.0) if duboo_mode else (127.0 + float(n) * 28.3)
+				var initial := Vector2(x, CarromBoard.base_y(1, duboo_mode))
 				if not _can_place_striker(initial):
 					continue
 				var offset := ghost - initial
@@ -790,7 +866,7 @@ func _choose_cpu_shot() -> Dictionary:
 				if projection <= 0.0:
 					continue
 				var closest_sq := center_line.length_squared() - projection * projection
-				var contact_radius: float = PHYSICS.STRIKER_RADIUS + piece["radius"]
+				var contact_radius: float = PHYSICS.radius_for("striker", duboo_mode) + piece["radius"]
 				if closest_sq > contact_radius * contact_radius:
 					continue
 				var hit_distance: float = projection - sqrt(maxf(0.0, contact_radius * contact_radius - closest_sq))
@@ -801,7 +877,7 @@ func _choose_cpu_shot() -> Dictionary:
 				var accuracy: float = impact_normal.dot(exit_dir)
 				if accuracy < 0.82:
 					continue
-				var approach_open := _segment_is_clear(initial, impact, PHYSICS.STRIKER_RADIUS + PHYSICS.COIN_RADIUS + 1.0, piece["id"])
+				var approach_open := _segment_is_clear(initial, impact, PHYSICS.radius_for("striker", duboo_mode) + PHYSICS.radius_for("white", duboo_mode) + 1.0, piece["id"])
 				if not approach_open:
 					continue
 				var travel: float = initial.distance_to(target) + target.distance_to(pocket)
@@ -811,7 +887,7 @@ func _choose_cpu_shot() -> Dictionary:
 				# A clean, shorter route is preferable to a long, speculative shot.
 				if score > best_score:
 					best_score = score
-					var speed: float = clampf(450.0 + initial.distance_to(target) * 0.72 + target.distance_to(pocket) * 0.45, 550.0, 1300.0)
+					var speed: float = clampf(350.0 + initial.distance_to(target) * 0.45 + target.distance_to(pocket) * 0.28, 430.0, 990.0) if duboo_mode else clampf(450.0 + initial.distance_to(target) * 0.72 + target.distance_to(pocket) * 0.45, 550.0, 1300.0)
 					best = {"x": x, "dir": direction, "speed": speed, "target": target}
 	# If no direct pocket is available, play a controlled contact/break shot.
 	if best_score < -1.0e8:
@@ -820,24 +896,24 @@ func _choose_cpu_shot() -> Dictionary:
 			if piece["pocketed"] or piece["kind"] != "black":
 				continue
 			for n in range(12):
-				var x := 130.0 + float(n) * 38.0
-				var initial := Vector2(x, CarromBoard.base_y(1))
+				var x := (112.0 + float(n) * 41.0) if duboo_mode else (130.0 + float(n) * 38.0)
+				var initial := Vector2(x, CarromBoard.base_y(1, duboo_mode))
 				if not _can_place_striker(initial):
 					continue
 				var target: Vector2 = piece["pos"]
 				var delta: Vector2 = target - initial
 				if delta.length_squared() < 10.0:
 					continue
-				var clear := _segment_is_clear(initial, target - delta.normalized() * 32.0, 28.0, piece["id"])
+				var clear := _segment_is_clear(initial, target - delta.normalized() * 32.0, PHYSICS.radius_for("striker", duboo_mode) + 2.0, piece["id"])
 				var score := delta.length() + (0.0 if clear else 850.0)
 				if score < best_fallback:
 					best_fallback = score
-					best = {"x": x, "dir": delta.normalized(), "speed": 870.0, "target": target}
+					best = {"x": x, "dir": delta.normalized(), "speed": 690.0 if duboo_mode else 870.0, "target": target}
 	# Difficulty affects mechanical precision but not physics or legal pieces.
 	var drift: float = [0.085, 0.028, 0.007][cpu_skill]
 	var jitter: float = randf_range(-drift, drift)
 	best["dir"] = (best["dir"] as Vector2).rotated(jitter)
-	best["speed"] = clampf(float(best["speed"]) * randf_range(1.0 - drift * 1.6, 1.0 + drift * 1.6), 420.0, MAX_SHOT_SPEED)
+	best["speed"] = clampf(float(best["speed"]) * randf_range(1.0 - drift * 1.6, 1.0 + drift * 1.6), 330.0 if duboo_mode else 420.0, _shot_speed_max())
 	return best
 
 func _segment_is_clear(a: Vector2, b: Vector2, clearance: float, excluded_id: int) -> bool:
