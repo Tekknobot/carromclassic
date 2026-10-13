@@ -1,0 +1,13 @@
+CARROM - MOBILE PULL-BACK CONTROLS
+
+Mobile portrait only:
+1. Move the striker along the glowing baseline.
+2. Press PULL BACK under the board.
+3. Drag backward (down for an upward shot; left/right to steer).
+4. Drag further for greater power, then RELEASE to shoot.
+5. A very short drag cancels. No timed hold or automatic 100% shot.
+
+The gesture is captured by one finger. An undelivered touch release is
+cancelled after five seconds of inactivity, or when the browser loses focus.
+
+Desktop mode, game rules, physics, sound, both board sets and CPU are unchanged.

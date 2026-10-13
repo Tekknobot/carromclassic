@@ -82,30 +82,20 @@ Sound detection is read-only and does not change any physical simulation.
 
 ## Portrait touch controls (Classic and Duboo)
 
-Portrait screens up to 820 logical pixels wide use a dedicated vertical layout.
-Tap and drag horizontally on the lower baseline to place the striker, then
-drag elsewhere on the board to choose a direction. Hold the **HOLD TO SHOOT**
-button to charge and release to strike. The other finger can still aim while
-the power button is held. On landscape screens the original mouse controls
-and sidebar remain unchanged.
+The portrait browser layout uses a **single pull-back-and-release gesture** for
+shot direction and power. Drag the striker sideways on the bottom baseline to
+place it, then touch the PULL BACK pad under the board. Drag **down** to shoot
+**up**, adjust the horizontal direction as you drag, then release. The longer
+the drag, the greater the shot power. A tiny drag cancels. The shot fires on
+release, not on a timer, and remains safe from touches on neighboring controls.
 
-The mobile HUD includes scores/Queen, shot status, power meter, a board/table
-selector, CPU skill, rules, and restart/next-board actions. No new abilities,
-rules, physics, or SFX have been added.
+If a browser fails to deliver the finger-up event, the unfinished pull will
+cancel itself after five seconds of inactivity. The Classic and Duboo desktop
+mouse controls remain unchanged.
 
+## Portrait mobile layout
 
-## Portrait touch layout (Classic and Duboo)
-
-Portrait mode uses a separate phone UI. The wood/marble frame is scaled to the
-full device width whenever vertical space allows. A reserved safe-area gutter
-above the title keeps the header clear of camera cutouts and rounded corners.
-Score, Queen, turn status, charge bar, table selector and buttons are laid out
-in their own non-overlapping bands below/above the game board. The typography
-and touch targets respond to the logical viewport size, avoiding tiny text on
-high-resolution phones.
-
-Touch: drag along the lower baseline to place the striker, drag elsewhere to
-aim, then hold **HOLD TO SHOOT** and release to fire. A second finger can aim
-while charging. Both game modes use identical touch controls.
-
-Landscape continues to use the original desktop layout and mouse controls.
+The phone UI keeps the nearly full-width board, large touch targets, and
+compact match information. The control labeled PULL BACK replaces the old
+timed CHARGE button. There is no need to hold, wait for a meter to fill, or
+use two fingers. Only the portrait input method changes.

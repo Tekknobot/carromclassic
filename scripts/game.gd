@@ -13,6 +13,12 @@ const MUTED := Color("#a7bbb1")
 const MINT := Color("#7bdac2")
 const GOLD := Color("#e8bf7e")
 const INK := Color("#0b211e")
+# Unified trim: bright enough to define controls without distracting from play.
+const EDGE := Color("#55786b")
+const EDGE_SOFT := Color("#3b6055")
+const PANEL_LIFT := Color("#24443c")
+const MOBILE_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_mobile.png")
+const DESKTOP_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_desktop.png")
 const MAX_BOARD_COUNT := 8
 const MATCH_TARGET := 25
 const MIN_SHOT_SPEED := 320.0
@@ -61,6 +67,8 @@ var power_label: Label
 var power_meter: ProgressBar
 var match_info: Label
 var rules_overlay: PanelContainer
+var rules_close_button: Button
+var rules_footer_button: Button
 var next_button: Button
 var restart_button: Button
 var cpu_selector: OptionButton
@@ -97,23 +105,35 @@ var mobile_power_panel: PanelContainer
 var mobile_power_label: Label
 var mobile_power_meter: ProgressBar
 var mobile_fire: Button
+var mobile_style_back: PanelContainer
 var mobile_style_bar: HBoxContainer
 var mobile_style_prev: Button
 var mobile_style_next: Button
 var mobile_style_name: Label
 var mobile_mobile_scale := 1.0
+var mobile_difficulty_panel: PanelContainer
+var mobile_difficulty_row: HBoxContainer
+var mobile_difficulty_label: Label
 var mobile_action_bar: HBoxContainer
 var mobile_cpu_select: OptionButton
 var mobile_rules: Button
 var mobile_restart: Button
 var mobile_next: Button
 var mobile_board_finger := -1
-var mobile_charge_finger := -1
 var mobile_board_mouse_down := false
-var mobile_mouse_charge := false
 var mobile_drag_baseline := false
 var mobile_aim_target := Vector2(340.0, 340.0)
+# The phone uses a captured drag gesture, not a timed hold. Pull backward on
+# the pad to choose direction and power; lift the SAME finger to shoot.
+var mobile_pull_finger := -1
+var mobile_pull_mouse := false
+var mobile_pull_origin := Vector2.ZERO
+var mobile_pull_length := 0.0
+var mobile_pull_idle := 0.0
+var mobile_locked_shot_direction := Vector2.UP
 var mobile_ignore_synthetic_mouse := 0.0
+const MOBILE_PULL_THRESHOLD := 16.0
+const MOBILE_PULL_MAX := 155.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
@@ -129,6 +149,7 @@ func _ready() -> void:
 	_refresh_board_style_ui()
 	_new_match()
 	_layout()
+	get_window().focus_exited.connect(_cancel_mobile_charge)
 	queue_redraw()
 
 func _notification(what: int) -> void:
@@ -241,21 +262,97 @@ func _gap(parent: Node, pixels: float) -> void:
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(spacer)
 
+func _apply_button_skin(b: Button, highlight: bool = false) -> void:
+	var normal_bg := MINT if highlight else PANEL_ALT
+	var normal_edge := Color("#a3eee0") if highlight else EDGE
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var bg: Color = normal_bg
+		var edge: Color = normal_edge
+		if state == "hover":
+			bg = Color("#9be9d5") if highlight else Color("#2c5046")
+			edge = Color("#c9fff0") if highlight else Color("#79af9e")
+		elif state == "pressed":
+			bg = Color("#5cc2ab") if highlight else Color("#15302a")
+		elif state == "disabled":
+			bg = Color("#34534b")
+			edge = EDGE_SOFT
+		var skin := _style(bg, edge, 11)
+		skin.content_margin_left = 13.0
+		skin.content_margin_right = 13.0
+		skin.content_margin_top = 9.0
+		skin.content_margin_bottom = 9.0
+		b.add_theme_stylebox_override(state, skin)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var ink := INK if highlight else TEXT
+	b.add_theme_color_override("font_color", ink)
+	b.add_theme_color_override("font_hover_color", ink)
+	b.add_theme_color_override("font_pressed_color", ink)
+	b.add_theme_color_override("font_disabled_color", Color("#c5d8ce"))
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+func _mobile_button_skin(b: Button, highlight: bool, u: float) -> void:
+	_apply_button_skin(b, highlight)
+	# Touch control padding is deliberately more generous than desktop.
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var skin := b.get_theme_stylebox(state).duplicate() as StyleBoxFlat
+		skin.set_corner_radius_all(maxi(10, int(round(12.0 * u))))
+		skin.content_margin_left = 12.0 * u
+		skin.content_margin_right = 12.0 * u
+		skin.content_margin_top = 8.0 * u
+		skin.content_margin_bottom = 8.0 * u
+		b.add_theme_stylebox_override(state, skin)
+
 func _make_button(parent: Node, title: String, highlight: bool = false) -> Button:
 	var b := Button.new()
 	b.text = title
-	b.custom_minimum_size.y = 42.0
+	b.custom_minimum_size.y = 44.0
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.add_theme_font_size_override("font_size", 14)
-	b.add_theme_color_override("font_color", INK if highlight else TEXT)
-	b.add_theme_color_override("font_hover_color", INK if highlight else TEXT)
-	b.add_theme_color_override("font_pressed_color", INK if highlight else TEXT)
-	b.add_theme_stylebox_override("normal", _style(MINT if highlight else PANEL_ALT, Color.TRANSPARENT, 9))
-	b.add_theme_stylebox_override("hover", _style(Color("#9aebd8") if highlight else Color("#38594d"), Color.TRANSPARENT, 9))
-	b.add_theme_stylebox_override("pressed", _style(Color("#58bba4") if highlight else Color("#102722"), Color.TRANSPARENT, 9))
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.add_theme_font_size_override("font_size", 15)
+	_apply_button_skin(b, highlight)
 	parent.add_child(b)
 	return b
+
+# Style the closed OptionButton AND its actual PopupMenu: the popup is a
+# separate window and does not automatically inherit the button's typography.
+func _style_cpu_option(opt: OptionButton, portrait: bool, u: float = 1.0, popup_width: int = 0) -> void:
+	var type_size := maxi(16, int(round((17.0 if portrait else 15.0) * u)))
+	opt.add_theme_font_size_override("font_size", type_size)
+	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		opt.add_theme_color_override(state, TEXT)
+	for state in ["normal", "hover", "pressed"]:
+		var fill: Color = PANEL_ALT
+		var trim: Color = EDGE
+		if state == "hover":
+			fill = Color("#305349")
+			trim = Color("#7cbaaa")
+		elif state == "pressed":
+			fill = Color("#19362f")
+			trim = MINT
+		var skin := _style(fill, trim, 11)
+		skin.content_margin_left = 15.0 * u
+		skin.content_margin_right = 9.0 * u
+		skin.content_margin_top = 9.0 * u
+		skin.content_margin_bottom = 9.0 * u
+		opt.add_theme_stylebox_override(state, skin)
+	opt.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	# An oversized custom chevron replaces the almost invisible default arrow.
+	opt.add_theme_icon_override("arrow", MOBILE_DIFFICULTY_ARROW if portrait else DESKTOP_DIFFICULTY_ARROW)
+	opt.add_theme_constant_override("arrow_margin", maxi(8, int(round(9.0 * u))))
+	opt.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	opt.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	var menu := opt.get_popup()
+	menu.add_theme_font_size_override("font_size", type_size)
+	menu.add_theme_color_override("font_color", TEXT)
+	menu.add_theme_color_override("font_hover_color", INK)
+	menu.add_theme_color_override("font_disabled_color", MUTED)
+	menu.add_theme_stylebox_override("panel", _style(Color("#1c3832"), Color("#668e80"), 10))
+	menu.add_theme_stylebox_override("hover", _style(MINT, Color("#a8efdc"), 6))
+	menu.add_theme_constant_override("v_separation", maxi(9, int(round((22.0 if portrait else 12.0) * u))))
+	menu.add_theme_constant_override("h_separation", maxi(10, int(round(16.0 * u))))
+	menu.add_theme_constant_override("item_start_padding", maxi(11, int(round(15.0 * u))))
+	menu.add_theme_constant_override("item_end_padding", maxi(11, int(round(15.0 * u))))
+	if popup_width > 0:
+		menu.min_size = Vector2i(popup_width, 0)
 
 func _build_ui() -> void:
 	title_label = _label(self, "CARROM", 29, TEXT)
@@ -269,7 +366,7 @@ func _build_ui() -> void:
 	classic_button.pressed.connect(func() -> void: _set_mode(false))
 	duboo_button.pressed.connect(func() -> void: _set_mode(true))
 	side_panel = PanelContainer.new()
-	side_panel.add_theme_stylebox_override("panel", _style(PANEL, Color("#3c5b51"), 16))
+	side_panel.add_theme_stylebox_override("panel", _style(PANEL, EDGE_SOFT, 14))
 	add_child(side_panel)
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 13)
@@ -285,11 +382,11 @@ func _build_ui() -> void:
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 10)
 	scroll.add_child(content)
-	_label(content, "THE MATCH", 11, MINT)
-	match_info = _label(content, "BOARD 1 OF 8   |   FIRST TO 25", 14, TEXT)
+	_label(content, "THE MATCH", 12, MINT)
+	match_info = _label(content, "BOARD 1 OF 8   |   FIRST TO 25", 16, TEXT)
 	# A dedicated cosmetic selector: usable during every phase of the match.
 	# "NEXT" wraps from theme 8 back to the untouched original theme 1.
-	style_heading = _label(content, "BOARD APPEARANCE", 11, MINT)
+	style_heading = _label(content, "BOARD APPEARANCE", 12, MINT)
 	var board_style_row := HBoxContainer.new()
 	style_selector = board_style_row
 	board_style_row.add_theme_constant_override("separation", 7)
@@ -298,7 +395,7 @@ func _build_ui() -> void:
 	board_style_prev.custom_minimum_size.x = 58
 	board_style_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	board_style_prev.pressed.connect(func() -> void: _cycle_board_style(-1))
-	board_style_label = _label(board_style_row, "01 / 08   CLASSIC TOURNAMENT", 12, TEXT, true)
+	board_style_label = _label(board_style_row, "01 / 08   CLASSIC TOURNAMENT", 13, TEXT, true)
 	board_style_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	board_style_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	board_style_label.custom_minimum_size.y = 45
@@ -309,14 +406,14 @@ func _build_ui() -> void:
 	var scores := HBoxContainer.new()
 	scores.add_theme_constant_override("separation", 10)
 	content.add_child(scores)
-	var white_card := _score_card(scores, "YOU   /   WHITE", _cream_color())
+	var white_card := _score_card(scores, "YOU   /   WHITE", MINT)
 	main_score_white = white_card[0]
 	coins_white = white_card[1]
 	var black_card := _score_card(scores, "CPU   /   BLACK", GOLD)
 	main_score_black = black_card[0]
 	coins_black = black_card[1]
 	var queens := PanelContainer.new()
-	queens.add_theme_stylebox_override("panel", _style(PANEL_ALT))
+	queens.add_theme_stylebox_override("panel", _style(PANEL_ALT, EDGE_SOFT, 11))
 	content.add_child(queens)
 	var queen_row := HBoxContainer.new()
 	queens.add_child(queen_row)
@@ -327,7 +424,7 @@ func _build_ui() -> void:
 	queen_row.add_child(queen_dot)
 	queen_text = _label(queen_row, "  QUEEN  /  ON THE BOARD", 13, TEXT)
 	var turn_card := PanelContainer.new()
-	turn_card.add_theme_stylebox_override("panel", _style(Color("#25483f"), Color("#3e6759")))
+	turn_card.add_theme_stylebox_override("panel", _style(Color("#25483f"), EDGE, 11))
 	content.add_child(turn_card)
 	var turn_stack := VBoxContainer.new()
 	turn_stack.add_theme_constant_override("separation", 6)
@@ -360,10 +457,7 @@ func _build_ui() -> void:
 	cpu_selector.add_item("Standard", 1)
 	cpu_selector.add_item("Expert", 2)
 	cpu_selector.select(1)
-	cpu_selector.add_theme_font_size_override("font_size", 14)
-	cpu_selector.add_theme_color_override("font_color", TEXT)
-	cpu_selector.add_theme_stylebox_override("normal", _style(PANEL_ALT, Color("#46665a"), 9))
-	cpu_selector.add_theme_stylebox_override("hover", _style(Color("#345a4e"), Color.TRANSPARENT, 9))
+	_style_cpu_option(cpu_selector, false)
 	cpu_selector.item_selected.connect(func(idx: int) -> void:
 		cpu_skill = idx
 		if mobile_cpu_select != null:
@@ -389,11 +483,11 @@ func _mobile_label(parent: Node, value: String, font_size: int, color: Color) ->
 
 func _mobile_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
-	var skin := _style(Color("#1d3b35"), Color("#426f60"), 11)
-	skin.content_margin_left = 9.0
-	skin.content_margin_right = 9.0
-	skin.content_margin_top = 5.0
-	skin.content_margin_bottom = 5.0
+	var skin := _style(Color("#1d3b35"), EDGE, 11)
+	skin.content_margin_left = 16.0
+	skin.content_margin_right = 16.0
+	skin.content_margin_top = 7.0
+	skin.content_margin_bottom = 7.0
 	panel.add_theme_stylebox_override("panel", skin)
 	panel.visible = false
 	add_child(panel)
@@ -404,44 +498,47 @@ func _build_mobile_ui() -> void:
 	mobile_match_label = _mobile_label(self, "BOARD 1 / 8", 16, GOLD)
 	mobile_match_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	mobile_match_label.visible = false
-	# Flat, separate regions: mode, score, board, status, charge, theme, actions.
+	# Flat, separate regions: mode, score, board, status, pull pad, theme, actions.
 	# No mobile input widgets ever sit on top of the physical board.
 	mobile_score_panel = _mobile_panel()
 	var scores := HBoxContainer.new()
-	scores.add_theme_constant_override("separation", 3)
+	scores.add_theme_constant_override("separation", 7)
 	mobile_score_panel.add_child(scores)
 	var you_stack := VBoxContainer.new()
 	you_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	you_stack.add_theme_constant_override("separation", 4)
 	scores.add_child(you_stack)
 	mobile_score_headings.append(_mobile_label(you_stack, "YOU / WHITE", 13, MINT))
 	mobile_you = _mobile_label(you_stack, "0 / 9", 18, TEXT)
 	var queen_stack := VBoxContainer.new()
 	queen_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	queen_stack.add_theme_constant_override("separation", 4)
 	scores.add_child(queen_stack)
 	mobile_score_headings.append(_mobile_label(queen_stack, "QUEEN", 13, Color("#f28b8b")))
 	mobile_queen = _mobile_label(queen_stack, "ON BOARD", 11, TEXT)
 	var cpu_stack := VBoxContainer.new()
 	cpu_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cpu_stack.add_theme_constant_override("separation", 4)
 	scores.add_child(cpu_stack)
 	mobile_score_headings.append(_mobile_label(cpu_stack, "CPU / BLACK", 13, GOLD))
 	mobile_cpu = _mobile_label(cpu_stack, "0 / 9", 18, TEXT)
 
 	mobile_status_panel = _mobile_panel()
 	var status_stack := VBoxContainer.new()
-	status_stack.add_theme_constant_override("separation", 0)
+	status_stack.add_theme_constant_override("separation", 4)
 	mobile_status_panel.add_child(status_stack)
 	mobile_status_title = _mobile_label(status_stack, "YOUR BREAK", 12, MINT)
 	mobile_status_hint = _mobile_label(status_stack, "SLIDE THE STRIKER ON THE BASELINE", 10, TEXT)
 
 	mobile_power_panel = _mobile_panel()
 	var power_row := HBoxContainer.new()
-	power_row.add_theme_constant_override("separation", 11)
+	power_row.add_theme_constant_override("separation", 14)
 	mobile_power_panel.add_child(power_row)
 	var power_stack := VBoxContainer.new()
 	power_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	power_stack.add_theme_constant_override("separation", 7)
+	power_stack.add_theme_constant_override("separation", 9)
 	power_row.add_child(power_stack)
-	mobile_power_label = _mobile_label(power_stack, "POWER  0%", 15, TEXT)
+	mobile_power_label = _mobile_label(power_stack, "PULL BACK TO SHOOT", 15, TEXT)
 	mobile_power_meter = ProgressBar.new()
 	mobile_power_meter.min_value = 0.0
 	mobile_power_meter.max_value = 100.0
@@ -451,18 +548,20 @@ func _build_mobile_ui() -> void:
 	mobile_power_meter.add_theme_stylebox_override("background", _style(Color("#102522"), Color.TRANSPARENT, 5))
 	mobile_power_meter.add_theme_stylebox_override("fill", _style(MINT, Color.TRANSPARENT, 5))
 	power_stack.add_child(mobile_power_meter)
-	mobile_fire = _make_button(power_row, "HOLD TO SHOOT", true)
+	mobile_fire = _make_button(power_row, "PULL BACK", true)
 	mobile_fire.custom_minimum_size = Vector2(145, 66)
 	mobile_fire.size_flags_horizontal = Control.SIZE_SHRINK_END
-	# Hit testing happens in _input: touch release outside this rectangle
-	# must still release the shot, and the other finger may aim concurrently.
+	# The single pull gesture is captured globally, even when the finger
+	# moves beyond this visual pad. The pad itself is display-only.
 	mobile_fire.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# The unavailable state must remain readable while a player places the striker.
-	mobile_fire.add_theme_stylebox_override("disabled", _style(Color("#34594e"), Color("#638b7b"), 9))
+	mobile_fire.add_theme_stylebox_override("disabled", _style(Color("#34594e"), EDGE, 9))
 	mobile_fire.add_theme_color_override("font_disabled_color", Color("#dcebe4"))
 
+	mobile_style_back = _mobile_panel()
+	mobile_style_back.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	mobile_style_bar = HBoxContainer.new()
-	mobile_style_bar.add_theme_constant_override("separation", 5)
+	mobile_style_bar.add_theme_constant_override("separation", 8)
 	mobile_style_bar.visible = false
 	add_child(mobile_style_bar)
 	mobile_style_prev = _make_button(mobile_style_bar, "PREV")
@@ -476,8 +575,17 @@ func _build_mobile_ui() -> void:
 	mobile_style_next.size_flags_horizontal = Control.SIZE_SHRINK_END
 	mobile_style_next.pressed.connect(func() -> void: _cycle_board_style(1))
 
+	# Separate difficulty selector: the larger arrow and text need more width
+	# than the old cramped three-column action bar could provide.
+	mobile_difficulty_panel = _mobile_panel()
+	mobile_difficulty_row = HBoxContainer.new()
+	mobile_difficulty_row.add_theme_constant_override("separation", 12)
+	mobile_difficulty_panel.add_child(mobile_difficulty_row)
+	mobile_difficulty_label = _mobile_label(mobile_difficulty_row, "CPU DIFFICULTY", 15, MINT)
+	mobile_difficulty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	mobile_difficulty_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mobile_action_bar = HBoxContainer.new()
-	mobile_action_bar.add_theme_constant_override("separation", 5)
+	mobile_action_bar.add_theme_constant_override("separation", 11)
 	mobile_action_bar.visible = false
 	add_child(mobile_action_bar)
 	mobile_cpu_select = OptionButton.new()
@@ -486,14 +594,12 @@ func _build_mobile_ui() -> void:
 	mobile_cpu_select.add_item("EXPERT", 2)
 	mobile_cpu_select.select(cpu_skill)
 	mobile_cpu_select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mobile_cpu_select.add_theme_font_size_override("font_size", 16)
-	mobile_cpu_select.add_theme_color_override("font_color", TEXT)
-	mobile_cpu_select.add_theme_stylebox_override("normal", _style(PANEL_ALT, Color("#46665a"), 8))
+	_style_cpu_option(mobile_cpu_select, true)
 	mobile_cpu_select.item_selected.connect(func(index: int) -> void:
 		cpu_skill = index
 		cpu_selector.select(index)
 	)
-	mobile_action_bar.add_child(mobile_cpu_select)
+	mobile_difficulty_row.add_child(mobile_cpu_select)
 	mobile_rules = _make_button(mobile_action_bar, "RULES")
 	mobile_rules.pressed.connect(_open_rules)
 	mobile_restart = _make_button(mobile_action_bar, "RESTART")
@@ -515,9 +621,9 @@ func _mobile_sync() -> void:
 		mobile_queen.text = "ON BOARD"
 	mobile_status_title.text = status_title
 	if phase == "placement":
-		mobile_status_hint.text = "DRAG THE BASELINE TO PLACE"
+		mobile_status_hint.text = "MOVE STRIKER ON THE LOWER BASELINE"
 	elif phase == "aim":
-		mobile_status_hint.text = "DRAG TO AIM  -  HOLD SHOOT"
+		mobile_status_hint.text = "PULL BACK, THEN RELEASE"
 	elif phase == "charging":
 		mobile_status_hint.text = "RELEASE TO SHOOT"
 	elif phase == "moving":
@@ -526,7 +632,7 @@ func _mobile_sync() -> void:
 		mobile_status_hint.text = "OPPONENT PLAYING"
 	else:
 		mobile_status_hint.text = "CONTINUE USING BUTTONS BELOW"
-	mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0)) if phase == "charging" else "SHOT POWER"
+	mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0)) if phase == "charging" else "PULL BACK TO SHOOT"
 	mobile_power_meter.value = charge_power * 100.0 if phase == "charging" else 0.0
 	mobile_fire.disabled = phase not in ["aim", "charging"] or player_turn != 0 or rules_overlay.visible
 	mobile_next.visible = phase == "board_over"
@@ -540,16 +646,30 @@ func _mobile_sync() -> void:
 func _mobile_fire_visual(held: bool) -> void:
 	if mobile_fire == null:
 		return
-	mobile_fire.add_theme_stylebox_override("normal", _style(GOLD if held else MINT, Color.TRANSPARENT, 9))
+	if portrait_touch:
+		_mobile_button_skin(mobile_fire, true, mobile_mobile_scale)
+	else:
+		_apply_button_skin(mobile_fire, true)
+	if held:
+		var skin := _style(GOLD, Color("#fff2cf"), 11)
+		skin.content_margin_left = 12.0
+		skin.content_margin_right = 12.0
+		mobile_fire.add_theme_stylebox_override("normal", skin)
 	mobile_fire.add_theme_color_override("font_color", INK)
 
 func _cancel_mobile_charge() -> void:
-	mobile_charge_finger = -1
-	mobile_mouse_charge = false
+	mobile_pull_finger = -1
+	mobile_pull_mouse = false
+	mobile_pull_length = 0.0
+	mobile_pull_idle = 0.0
 	if phase == "charging" and player_turn == 0:
 		phase = "aim"
+		charge_power = 0.0
 		board.charging = false
+		board.aim_power = 0.0
 	_mobile_fire_visual(false)
+	if mobile_fire != null:
+		mobile_fire.text = "PULL BACK"
 
 func _cream_color() -> Color:
 	return Color("#f8eacc")
@@ -557,42 +677,67 @@ func _cream_color() -> Color:
 func _score_card(parent: Node, heading: String, accent: Color) -> Array[Label]:
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	card.add_theme_stylebox_override("panel", _style(PANEL_ALT))
+	card.add_theme_stylebox_override("panel", _style(PANEL_ALT, EDGE_SOFT, 11))
 	parent.add_child(card)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 2)
 	card.add_child(v)
 	_label(v, heading, 11, accent)
-	var score := _label(v, "0", 35, TEXT)
+	var score := _label(v, "0", 34, TEXT)
 	var sub := _label(v, "0 / 9 pocketed", 12, MUTED)
 	return [score, sub]
 
 func _build_rules_overlay() -> void:
+	# A fixed header and footer keep dismiss actions visible while the long
+	# instructions scroll independently; important on narrow touch screens.
 	rules_overlay = PanelContainer.new()
 	rules_overlay.visible = false
 	rules_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	rules_overlay.add_theme_stylebox_override("panel", _style(Color("#19332f"), Color("#74ae97"), 16))
+	var panel_skin := _style(Color("#19332f"), MINT, 14)
+	panel_skin.content_margin_left = 13.0
+	panel_skin.content_margin_right = 13.0
+	panel_skin.content_margin_top = 13.0
+	panel_skin.content_margin_bottom = 13.0
+	rules_overlay.add_theme_stylebox_override("panel", panel_skin)
 	add_child(rules_overlay)
-	var inner := MarginContainer.new()
-	inner.add_theme_constant_override("margin_left", 12)
-	inner.add_theme_constant_override("margin_right", 12)
-	inner.add_theme_constant_override("margin_top", 12)
-	inner.add_theme_constant_override("margin_bottom", 12)
-	rules_overlay.add_child(inner)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	rules_overlay.add_child(column)
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 12)
+	column.add_child(header)
+	var title := _label(header, "CARROM  /  RULES", 22, MINT)
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	rules_close_button = _make_button(header, "CLOSE", true)
+	rules_close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	rules_close_button.custom_minimum_size = Vector2(104, 48)
+	rules_close_button.pressed.connect(_close_rules)
+	var separator := HSeparator.new()
+	column.add_child(separator)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	inner.add_child(scroll)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(scroll)
 	var v := VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_theme_constant_override("separation", 12)
 	scroll.add_child(v)
-	_label(v, "CARROM  /  QUICK RULES", 23, MINT)
 	rules_body = _label(v,
 		"OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nWhite breaks. You keep shooting whenever you pocket at least one of your own pieces; otherwise the turn passes. Opponent pieces remain pocketed if you sink them.\n\nTHE QUEEN\nYou must pocket one of your own pieces before you can claim the Queen. Pocket the Queen and one of your own pieces in the same shot, or pocket your own piece on your very next shot to cover it. An uncovered Queen returns to the center. If you capture the Queen together with your very first piece, a further cover is required.\n\nSTRIKER FOUL\nPocketing the striker costs one of your previously pocketed pieces (or incurs one owed piece if none is available), and ends your turn.\n\nSCORING\nThe board winner scores one point for each opponent piece left on the board. The Queen adds three points if secured by the winner, or one when their pre-board match score is at least 22. First to 25 points or the leader after eight boards wins.\n\nThis is a playable standard-rules adaptation: specialist referee calls and uncommon compound fouls are simplified.",
 		14, TEXT, true)
-	var close := _make_button(v, "RETURN TO BOARD", true)
-	close.pressed.connect(func() -> void: rules_overlay.visible = false)
+	rules_footer_button = _make_button(column, "RETURN TO GAME", true)
+	rules_footer_button.custom_minimum_size.y = 50.0
+	rules_footer_button.pressed.connect(_close_rules)
+
+func _close_rules() -> void:
+	if rules_overlay == null or not rules_overlay.visible:
+		return
+	rules_overlay.hide()
+	_cancel_mobile_charge()
+	_mobile_sync()
+	if sound_click != null:
+		sound_click.play()
 
 func _set_mode(use_duboo: bool) -> void:
 	if duboo_mode == use_duboo:
@@ -613,10 +758,10 @@ func _refresh_mode_ui() -> void:
 	board.duboo_mode = duboo_mode
 	for b in [classic_button, duboo_button]:
 		var selected = (b == duboo_button) if duboo_mode else (b == classic_button)
-		b.add_theme_stylebox_override("normal", _style(MINT if selected else PANEL_ALT, Color.TRANSPARENT, 9))
-		b.add_theme_color_override("font_color", INK if selected else TEXT)
-		b.add_theme_color_override("font_hover_color", INK if selected else TEXT)
-		b.add_theme_color_override("font_pressed_color", INK if selected else TEXT)
+		if portrait_touch:
+			_mobile_button_skin(b, selected, mobile_mobile_scale)
+		else:
+			_apply_button_skin(b, selected)
 	# Reuse the original appearance selector for both modes. No extra controls.
 	style_heading.visible = true
 	style_heading.text = "DUBOO TABLE" if duboo_mode else "BOARD APPEARANCE"
@@ -628,7 +773,7 @@ func _refresh_mode_ui() -> void:
 		else:
 			rules_body.text = "OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nYou keep shooting whenever you pocket your color; otherwise the turn passes.\n\nTHE QUEEN\nYou must first pocket a piece of your color. Pocket the Queen and another piece in the same shot or cover it on your next shot. If not covered, she returns to the center.\n\nSTRIKER FOUL\nPocketing the striker costs one of your pocketed pieces, or creates an owed piece, and ends the turn.\n\nSCORING\nFirst to 25 points or the leader after eight boards wins. Uncommon compound fouls are simplified."
 	if portrait_touch:
-		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nDrag the striker along the lower baseline to place it. Drag anywhere on the board to aim. Hold the SHOOT button to build power, then lift your finger to strike. You can use a second finger to adjust aim while charging."
+		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nDrag the striker along the lower baseline to place it. Touch PULL BACK below the board. Drag backward to set shot angle and strength: down means shoot up, and sideways changes the angle. Release to fire. A very short pull cancels the shot. No timer and no need to hold."
 	_refresh_board_style_ui()
 	_mobile_sync()
 	board.queue_redraw()
@@ -652,10 +797,13 @@ func _layout() -> void:
 	if portrait_touch:
 		_layout_portrait(sz)
 		return
-	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_bar, mobile_action_bar, mobile_match_label]:
+	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_back, mobile_style_bar, mobile_difficulty_panel, mobile_action_bar, mobile_match_label]:
 		mobile_node.visible = false
-	classic_button.add_theme_font_size_override("font_size", 14)
-	duboo_button.add_theme_font_size_override("font_size", 14)
+	mode_bar.add_theme_constant_override("separation", 8)
+	classic_button.add_theme_font_size_override("font_size", 15)
+	duboo_button.add_theme_font_size_override("font_size", 15)
+	_style_cpu_option(cpu_selector, false)
+	_style_cpu_option(mobile_cpu_select, true)
 	side_panel.visible = true
 	board_caption.visible = true
 	tip_label.visible = true
@@ -675,6 +823,7 @@ func _layout() -> void:
 	board.position = Vector2(board_left + 43.0 * scale_value, board_top + 43.0 * scale_value)
 	side_panel.position = Vector2(side_x, 18.0)
 	side_panel.size = Vector2(side_w, maxf(170.0, sz.y - 36.0))
+	cpu_selector.get_popup().min_size = Vector2i(maxi(200, int(side_w - 66.0)), 0)
 	title_label.add_theme_font_size_override("font_size", 29)
 	title_label.position = Vector2(26.0, 9.0)
 	title_label.size = Vector2(board_w - 46.0, 40.0)
@@ -691,97 +840,139 @@ func _layout() -> void:
 	rules_overlay.size = dialog_size
 
 func _layout_portrait(sz: Vector2) -> void:
-	# Use screen WIDTH first: portrait phones deserve a full-width board.
-	# UI dimensions and fonts share a density factor so the browser cannot
-	# shrink 10px labels into unreadable text on high-resolution displays.
+	# Portrait has a dedicated vertical composition. It fills tall screens by
+	# distributing surplus height among gaps and controls instead of leaving a
+	# blank region below an otherwise compact interface.
 	side_panel.visible = false
 	board_caption.visible = false
 	tip_label.visible = false
-	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_bar, mobile_action_bar, mobile_match_label]:
+	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_style_back, mobile_style_bar, mobile_difficulty_panel, mobile_action_bar, mobile_match_label]:
 		mobile_node.visible = true
-	var u := clampf(minf(sz.x / 430.0, sz.y / 780.0), 0.72, 2.5)
+
+	# Width sets the UI density; tall phone displays use extra height as spacing.
+	var u := clampf(sz.x / 430.0, 0.72, 2.5)
 	mobile_mobile_scale = u
-	var gutter := 7.0 * u
-	# Clear the camera cutout, rounded phone corners, and the browser top edge.
+	var gutter := 9.0 * u
 	var safe_top := 28.0 * u
-	var title_h := 29.0 * u
-	var mode_h := 48.0 * u
-	var scores_h := 64.0 * u
+	var safe_bottom := 14.0 * u
+	var title_h := 32.0 * u
+	var title_gap := 10.0 * u
+	var mode_h := 47.0 * u
+	var scores_h := 61.0 * u
 	var status_h := 52.0 * u
-	var power_h := 78.0 * u
-	var theme_h := 50.0 * u
-	var actions_h := 54.0 * u
-	var lower_gap := 6.0 * u
-	var min_bottom := 12.0 * u
-	# Unambiguous top-to-bottom order, each element within its own rectangle.
+	var power_h := 66.0 * u
+	var theme_h := 49.0 * u
+	var difficulty_h := 52.0 * u
+	var actions_h := 53.0 * u
+	var gap := 5.5 * u
+	var preferred_board_width := sz.x - 2.0 * gutter
+	var fixed_h := safe_top + title_h + title_gap + mode_h + scores_h + status_h + power_h + theme_h + difficulty_h + actions_h + safe_bottom + 7.0 * gap
+	var board_width := minf(preferred_board_width, maxf(220.0 * u, sz.y - fixed_h))
+	# Portrait devices shorter than 9:16 may need some compression; the usual
+	# Galaxy S22 proportions preserve an almost edge-to-edge wooden frame.
+	var spare := maxf(0.0, sz.y - fixed_h - board_width)
+	var big_gap := gap + spare * 0.1
+	status_h += spare * 0.08
+	power_h += spare * 0.08
+	difficulty_h += spare * 0.06
+	actions_h += spare * 0.08
 	var y := safe_top
+
+	# Branding never intersects the camera cutout / top rounded corners.
 	title_label.position = Vector2(gutter + 2.0 * u, y)
 	title_label.size = Vector2(sz.x * 0.48, title_h)
 	title_label.add_theme_font_size_override("font_size", maxi(22, int(round(29.0 * u))))
-	mobile_match_label.position = Vector2(sz.x * 0.53, y + 1.0 * u)
-	mobile_match_label.size = Vector2(sz.x * 0.45 - gutter, title_h)
-	mobile_match_label.add_theme_font_size_override("font_size", maxi(12, int(round(16.0 * u))))
-	y += title_h + 4.0 * u
+	mobile_match_label.position = Vector2(sz.x * 0.54, y)
+	mobile_match_label.size = Vector2(sz.x * 0.46 - gutter, title_h)
+	mobile_match_label.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
+	y += title_h + title_gap
+
 	mode_bar.position = Vector2(gutter, y)
 	mode_bar.size = Vector2(sz.x - gutter * 2.0, mode_h)
+	mode_bar.add_theme_constant_override("separation", maxi(8, int(round(9.0 * u))))
 	classic_button.custom_minimum_size.y = mode_h
 	duboo_button.custom_minimum_size.y = mode_h
 	classic_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
 	duboo_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
-	y += mode_h + lower_gap
+	_mobile_button_skin(classic_button, not duboo_mode, u)
+	_mobile_button_skin(duboo_button, duboo_mode, u)
+	y += mode_h + big_gap
+
 	mobile_score_panel.position = Vector2(gutter, y)
 	mobile_score_panel.size = Vector2(sz.x - gutter * 2.0, scores_h)
 	for heading in mobile_score_headings:
-		heading.add_theme_font_size_override("font_size", maxi(13, int(round(15.0 * u))))
-	mobile_you.add_theme_font_size_override("font_size", maxi(20, int(round(25.0 * u))))
-	mobile_cpu.add_theme_font_size_override("font_size", maxi(20, int(round(25.0 * u))))
+		heading.add_theme_font_size_override("font_size", maxi(13, int(round(14.5 * u))))
+	mobile_you.add_theme_font_size_override("font_size", maxi(19, int(round(22.0 * u))))
+	mobile_cpu.add_theme_font_size_override("font_size", maxi(19, int(round(22.0 * u))))
 	mobile_queen.add_theme_font_size_override("font_size", maxi(14, int(round(17.0 * u))))
-	y += scores_h + lower_gap
-	# Keep the wooden/marble frame inside its own board rectangle.
-	# Only reduce board width on unusually short screens where controls would
-	# otherwise fall below the viewport; never shrink it to reserve empty space.
-	var controls_after := status_h + power_h + theme_h + actions_h + lower_gap * 4.0 + min_bottom
-	var board_width := minf(sz.x - 2.0 * gutter, sz.y - y - controls_after)
-	board_width = maxf(200.0 * u, board_width)
+	y += scores_h + big_gap
+
+	# Board dimensions follow the width first, never a desktop-style sidebar.
 	var scale_value := board_width / 766.0
 	var board_left := (sz.x - board_width) * 0.5
 	board.scale = Vector2.ONE * scale_value
 	board.position = Vector2(board_left + 43.0 * scale_value, y + 43.0 * scale_value)
-	y += board_width + lower_gap
+	y += board_width + big_gap
+
 	mobile_status_panel.position = Vector2(gutter, y)
 	mobile_status_panel.size = Vector2(sz.x - gutter * 2.0, status_h)
 	mobile_status_title.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
-	mobile_status_hint.add_theme_font_size_override("font_size", maxi(13, int(round(16.0 * u))))
-	y += status_h + lower_gap
+	mobile_status_hint.add_theme_font_size_override("font_size", maxi(13, int(round(15.0 * u))))
+	y += status_h + big_gap
+
 	mobile_power_panel.position = Vector2(gutter, y)
 	mobile_power_panel.size = Vector2(sz.x - gutter * 2.0, power_h)
-	mobile_power_label.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
-	mobile_power_meter.custom_minimum_size.y = 14.0 * u
-	mobile_fire.custom_minimum_size = Vector2(157.0 * u, power_h - 10.0 * u)
+	mobile_power_label.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
+	mobile_power_meter.custom_minimum_size.y = 13.0 * u
+	# Respect the panel's own padding; the pull pad remains fully visible.
+	mobile_fire.custom_minimum_size = Vector2(157.0 * u, power_h - 17.0 * u)
 	mobile_fire.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
-	y += power_h + lower_gap
-	mobile_style_bar.position = Vector2(gutter, y)
-	mobile_style_bar.size = Vector2(sz.x - gutter * 2.0, theme_h)
-	mobile_style_prev.custom_minimum_size = Vector2(72.0 * u, theme_h)
-	mobile_style_next.custom_minimum_size = Vector2(72.0 * u, theme_h)
-	mobile_style_prev.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
-	mobile_style_next.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
+	_mobile_fire_visual(phase == "charging")
+	y += power_h + big_gap
+
+	mobile_style_back.position = Vector2(gutter, y)
+	mobile_style_back.size = Vector2(sz.x - gutter * 2.0, theme_h)
+	mobile_style_bar.position = Vector2(gutter + 4.0 * u, y + 3.0 * u)
+	mobile_style_bar.size = Vector2(sz.x - gutter * 2.0 - 8.0 * u, theme_h - 6.0 * u)
+	mobile_style_prev.custom_minimum_size = Vector2(67.0 * u, theme_h - 6.0 * u)
+	mobile_style_next.custom_minimum_size = Vector2(67.0 * u, theme_h - 6.0 * u)
+	mobile_style_prev.add_theme_font_size_override("font_size", maxi(15, int(round(16.5 * u))))
+	mobile_style_next.add_theme_font_size_override("font_size", maxi(15, int(round(16.5 * u))))
 	mobile_style_name.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
-	y += theme_h + lower_gap
+	_mobile_button_skin(mobile_style_prev, false, u)
+	_mobile_button_skin(mobile_style_next, false, u)
+	y += theme_h + big_gap
+
+	# Dedicated difficulty bar: a real, large arrow and a wide tap target.
+	mobile_difficulty_panel.position = Vector2(gutter, y)
+	mobile_difficulty_panel.size = Vector2(sz.x - gutter * 2.0, difficulty_h)
+	mobile_difficulty_row.add_theme_constant_override("separation", maxi(8, int(round(11.0 * u))))
+	mobile_difficulty_label.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
+	mobile_cpu_select.custom_minimum_size = Vector2(181.0 * u, difficulty_h - 14.0 * u)
+	_style_cpu_option(mobile_cpu_select, true, u, int(round(181.0 * u)))
+	y += difficulty_h + big_gap
+
 	mobile_action_bar.position = Vector2(gutter, y)
 	mobile_action_bar.size = Vector2(sz.x - gutter * 2.0, actions_h)
-	mobile_cpu_select.custom_minimum_size = Vector2(125.0 * u, actions_h)
-	mobile_cpu_select.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
+	mobile_action_bar.add_theme_constant_override("separation", maxi(8, int(round(10.0 * u))))
 	for b in [mobile_rules, mobile_restart, mobile_next]:
 		b.custom_minimum_size.y = actions_h
-		b.add_theme_font_size_override("font_size", maxi(14, int(round(16.0 * u))))
-	# Readable modal typography on touch as well.
-	var dialog_size := Vector2(sz.x - gutter * 2.0, minf(sz.y - safe_top - min_bottom, 740.0 * u))
+		b.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
+		_mobile_button_skin(b, b == mobile_next, u)
+
+	# A readable, safely inset modal with fixed dismissal controls.
+	var dialog_size := Vector2(sz.x - gutter * 2.0, minf(sz.y - safe_top - safe_bottom, 740.0 * u))
 	rules_overlay.position = Vector2((sz.x - dialog_size.x) * 0.5, safe_top)
 	rules_overlay.size = dialog_size
-	rules_body.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
+	rules_body.add_theme_font_size_override("font_size", maxi(16, int(round(17.0 * u))))
+	rules_close_button.custom_minimum_size = Vector2(94.0 * u, 48.0 * u)
+	rules_close_button.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
+	rules_footer_button.custom_minimum_size.y = 52.0 * u
+	rules_footer_button.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
+	_mobile_button_skin(rules_close_button, true, u)
+	_mobile_button_skin(rules_footer_button, true, u)
 	if rules_body != null and not rules_body.text.contains("PORTRAIT TOUCH CONTROLS"):
-		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nDrag along the lower baseline to place the striker. Drag elsewhere on the board to aim. Hold SHOOT to charge and release to fire. You can aim with another finger while charging."
+		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nMove the striker by dragging on the lower baseline. Then touch PULL BACK below the board, drag backward to set both direction and power, and lift your finger to shoot. A short drag cancels. There is no timed charging or automatic firing."
 	_mobile_sync()
 
 func _load_board_style() -> void:
@@ -867,6 +1058,10 @@ func _begin_board() -> void:
 	board.show_cpu_target = false
 	charge_time = 0.0
 	mobile_aim_target = _get_striker()["pos"] + Vector2.UP * 240.0
+	if portrait_touch:
+		aim_direction = Vector2.UP
+		board.aim_direction = aim_direction
+		mobile_locked_shot_direction = aim_direction
 	cpu_time = 0.75
 	if player_turn == 0:
 		_set_status("YOUR BREAK" if board_number == 1 else "YOUR TURN", "Move onto the bottom baseline and click to place your striker.")
@@ -968,7 +1163,8 @@ func _mobile_is_board(point: Vector2) -> bool:
 	return Rect2(-6.0, -6.0, 692.0, 692.0).has_point(point)
 
 func _mobile_start_board_drag(screen_point: Vector2) -> bool:
-	if player_turn != 0 or phase not in ["placement", "aim", "charging"]:
+	# Mobile aiming is a separate gesture completed BEFORE charging.
+	if player_turn != 0 or phase not in ["placement", "aim"]:
 		return false
 	var local := _mobile_board_point(screen_point)
 	if not _mobile_is_board(local):
@@ -981,7 +1177,9 @@ func _mobile_start_board_drag(screen_point: Vector2) -> bool:
 	return true
 
 func _mobile_update_board_drag(screen_point: Vector2) -> void:
-	if player_turn != 0 or phase not in ["placement", "aim", "charging"]:
+	# Do not allow a second finger, a drag, or UI touch to turn the shot
+	# while a pull gesture is active. Only the captured finger steers.
+	if player_turn != 0 or phase not in ["placement", "aim"]:
 		return
 	var local := _mobile_board_point(screen_point)
 	if mobile_drag_baseline:
@@ -991,8 +1189,14 @@ func _mobile_update_board_drag(screen_point: Vector2) -> void:
 				board.show_aim = true
 				board.side = 0
 				mobile_aim_target = _get_striker()["pos"] + Vector2.UP * 220.0
+				aim_direction = Vector2.UP
+				board.aim_direction = aim_direction
 				sound_click.play()
-				_set_status("AIM YOUR SHOT", "Drag on the board to aim. Hold SHOOT and release to fire.")
+				_set_status("AIM YOUR SHOT", "Pull back on the shot pad to aim and release to fire.")
+			else:
+				# Sliding along the baseline should not rotate a previously aimed
+				# shot merely because the striker's world position has changed.
+				mobile_aim_target = _get_striker()["pos"] + aim_direction.normalized() * 220.0
 		else:
 			_set_status("BASELINE BLOCKED", "Try another point on the lower baseline.")
 	else:
@@ -1003,49 +1207,93 @@ func _mobile_update_board_drag(screen_point: Vector2) -> void:
 			board.aim_direction = aim_direction
 			board.queue_redraw()
 
-func _mobile_start_charge() -> void:
+func _mobile_start_pull(position: Vector2) -> void:
 	if player_turn != 0 or phase != "aim" or rules_overlay.visible:
 		return
+	# Starting a drag never fires anything. It only captures the control finger.
+	mobile_pull_origin = position
+	mobile_pull_length = 0.0
+	mobile_pull_idle = 0.0
+	mobile_locked_shot_direction = aim_direction.normalized() if aim_direction.length_squared() > 0.5 else Vector2.UP
+	charge_power = 0.0
 	phase = "charging"
-	charge_time = 0.0
-	charge_power = 0.20
-	board.charging = true
+	board.charging = false
+	board.aim_power = 0.0
 	_mobile_fire_visual(true)
+	mobile_fire.text = "PULL BACK"
 	_mobile_sync()
 
-func _mobile_release_charge() -> void:
-	if phase == "charging" and player_turn == 0 and not rules_overlay.visible:
-		_mobile_fire_visual(false)
-		_shoot(aim_direction, charge_power)
+func _mobile_update_pull(position: Vector2) -> void:
+	if phase != "charging" or player_turn != 0:
+		return
+	# As with a slingshot, dragging downward sends the striker upward.
+	# Screen coordinates are already in the same global coordinate system.
+	var pull: Vector2 = mobile_pull_origin - position
+	mobile_pull_length = pull.length()
+	mobile_pull_idle = 0.0
+	var scale_factor := maxf(0.7, mobile_mobile_scale)
+	var dead_zone := MOBILE_PULL_THRESHOLD * scale_factor
+	if mobile_pull_length >= dead_zone:
+		mobile_locked_shot_direction = pull.normalized()
+		aim_direction = mobile_locked_shot_direction
+		board.aim_direction = aim_direction
+		var power_fraction := clampf((mobile_pull_length - dead_zone) / ((MOBILE_PULL_MAX - MOBILE_PULL_THRESHOLD) * scale_factor), 0.0, 1.0)
+		charge_power = lerpf(0.20, 1.0, power_fraction)
 	else:
-		_mobile_fire_visual(false)
+		charge_power = 0.0
+	board.aim_power = charge_power
+	mobile_fire.text = "RELEASE  %d%%" % int(round(charge_power * 100.0)) if charge_power > 0.0 else "PULL BACK"
+	mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0)) if charge_power > 0.0 else "PULL BACK TO SHOOT"
+	mobile_power_meter.value = charge_power * 100.0
+	board.queue_redraw()
+
+func _mobile_end_pull() -> void:
+	if phase == "charging" and player_turn == 0 and not rules_overlay.visible:
+		var should_shoot := mobile_pull_length >= MOBILE_PULL_THRESHOLD * maxf(0.7, mobile_mobile_scale)
+		var shot_direction := mobile_locked_shot_direction
+		var shot_power := charge_power
+		_cancel_mobile_charge()
+		if should_shoot:
+			_shoot(shot_direction, shot_power)
+		else:
+			_set_status("AIM YOUR SHOT", "Pull back on the shot pad, then release to shoot.")
+			_refresh_ui()
+	else:
+		_cancel_mobile_charge()
 
 func _mobile_handle_touch(event: InputEventScreenTouch) -> void:
-	mobile_ignore_synthetic_mouse = 0.65
+	mobile_ignore_synthetic_mouse = 0.75
 	if event.pressed:
 		if rules_overlay.visible:
 			return
-		if mobile_charge_finger < 0 and mobile_fire.get_global_rect().has_point(event.position):
-			if phase == "aim" and player_turn == 0:
-				mobile_charge_finger = event.index
-				_mobile_start_charge()
-				get_viewport().set_input_as_handled()
+		# One finger owns one gesture. A new press can also recover if the
+		# browser failed to deliver the previous finger's release.
+		if mobile_fire.get_global_rect().has_point(event.position):
+			if player_turn == 0 and phase in ["aim", "charging"]:
+				if phase == "charging":
+					_cancel_mobile_charge()
+				mobile_pull_finger = event.index
+				_mobile_start_pull(event.position)
+			get_viewport().set_input_as_handled()
+			return
+		if phase == "charging":
+			get_viewport().set_input_as_handled()
 			return
 		if mobile_board_finger < 0 and _mobile_start_board_drag(event.position):
 			mobile_board_finger = event.index
 			get_viewport().set_input_as_handled()
 	else:
-		if event.index == mobile_charge_finger:
-			mobile_charge_finger = -1
-			_mobile_release_charge()
+		if event.index == mobile_pull_finger:
+			mobile_pull_finger = -1
+			_mobile_end_pull()
 			get_viewport().set_input_as_handled()
 		elif event.index == mobile_board_finger:
 			mobile_board_finger = -1
 			get_viewport().set_input_as_handled()
 
 func _mobile_handle_mouse(event: InputEvent) -> void:
-	# Allows portrait testing with a real mouse in an editor/browser, but
-	# ignores the synthetic mouse events emitted by a physical touchscreen.
+	# Allow mouse testing in the browser, while ignoring touch-generated mouse
+	# events to prevent duplicate shots or stray aim changes.
 	if mobile_ignore_synthetic_mouse > 0.0:
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -1053,33 +1301,49 @@ func _mobile_handle_mouse(event: InputEvent) -> void:
 			if rules_overlay.visible:
 				return
 			if mobile_fire.get_global_rect().has_point(event.position):
-				if phase == "aim":
-					mobile_mouse_charge = true
-					_mobile_start_charge()
-					get_viewport().set_input_as_handled()
-			elif _mobile_start_board_drag(event.position):
+				if player_turn == 0 and phase in ["aim", "charging"]:
+					if phase == "charging":
+						_cancel_mobile_charge()
+					mobile_pull_mouse = true
+					_mobile_start_pull(event.position)
+				get_viewport().set_input_as_handled()
+			elif phase != "charging" and _mobile_start_board_drag(event.position):
 				mobile_board_mouse_down = true
 				get_viewport().set_input_as_handled()
 		else:
-			if mobile_mouse_charge:
-				mobile_mouse_charge = false
-				_mobile_release_charge()
+			if mobile_pull_mouse:
+				mobile_pull_mouse = false
+				_mobile_end_pull()
 				get_viewport().set_input_as_handled()
 			elif mobile_board_mouse_down:
 				mobile_board_mouse_down = false
 				get_viewport().set_input_as_handled()
-	elif event is InputEventMouseMotion and mobile_board_mouse_down:
-		_mobile_update_board_drag(event.position)
-		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion:
+		if mobile_pull_mouse:
+			_mobile_update_pull(event.position)
+			get_viewport().set_input_as_handled()
+		elif mobile_board_mouse_down:
+			_mobile_update_board_drag(event.position)
+			get_viewport().set_input_as_handled()
 
 func _input(event: InputEvent) -> void:
+	if rules_overlay != null and rules_overlay.visible:
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_close_rules()
+			get_viewport().set_input_as_handled()
+		return
 	if not portrait_touch:
 		return
 	if event is InputEventScreenTouch:
 		_mobile_handle_touch(event)
 	elif event is InputEventScreenDrag:
-		mobile_ignore_synthetic_mouse = 0.65
-		if event.index == mobile_board_finger:
+		mobile_ignore_synthetic_mouse = 0.75
+		if event.index == mobile_pull_finger:
+			_mobile_update_pull(event.position)
+			get_viewport().set_input_as_handled()
+		elif phase == "charging":
+			get_viewport().set_input_as_handled()
+		elif event.index == mobile_board_finger:
 			_mobile_update_board_drag(event.position)
 			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton or event is InputEventMouseMotion:
@@ -1090,7 +1354,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if rules_overlay.visible:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-			rules_overlay.visible = false
+			_close_rules()
 		return
 	if player_turn != 0 or phase not in ["placement", "aim", "charging"]:
 		return
@@ -1125,23 +1389,35 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	mobile_ignore_synthetic_mouse = maxf(0.0, mobile_ignore_synthetic_mouse - delta)
+	# Browser/webview touchcancel is not always delivered. A dead pull must
+	# cancel itself, never fire a shot or strand the player in charging.
+	if portrait_touch and phase == "charging":
+		mobile_pull_idle += delta
+		if mobile_pull_idle > 5.0:
+			_cancel_mobile_charge()
+			_set_status("AIM YOUR SHOT", "Shot reset. Pull back and release to shoot.")
+			_refresh_ui()
+			return
 	if rules_overlay != null and rules_overlay.visible:
 		return
 	if phase == "aim" or phase == "charging":
-		var mouse := mobile_aim_target if portrait_touch else _screen_to_board()
-		var diff: Vector2 = mouse - _get_striker()["pos"]
-		if diff.length() > 22.0:
-			aim_direction = diff.normalized()
+		if portrait_touch and phase == "charging":
+			# Only the captured pull gesture can adjust mobile aim and power.
+			# No timers and no automatic fire at 100 percent.
+			aim_direction = mobile_locked_shot_direction
 			board.aim_direction = aim_direction
-		if phase == "charging":
+		else:
+			var mouse := mobile_aim_target if portrait_touch else _screen_to_board()
+			var diff: Vector2 = mouse - _get_striker()["pos"]
+			if diff.length() > 22.0:
+				aim_direction = diff.normalized()
+				board.aim_direction = aim_direction
+		if phase == "charging" and not portrait_touch:
 			charge_time = minf(charge_time + delta, 1.5)
 			charge_power = 0.20 + 0.80 * charge_time / 1.5
 			power_label.text = "SHOT POWER   %d%%" % int(round(charge_power * 100.0))
 			power_meter.value = charge_power * 100.0
 			board.charging = true
-			if portrait_touch:
-				mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0))
-				mobile_power_meter.value = charge_power * 100.0
 		board.aim_power = charge_power
 		board.queue_redraw()
 	elif phase == "placement" and not portrait_touch:
@@ -1172,8 +1448,12 @@ func _shoot(direction: Vector2, power: float) -> void:
 	if direction.length_squared() < 0.5:
 		return
 	phase = "moving"
-	mobile_charge_finger = -1
-	mobile_mouse_charge = false
+	mobile_pull_finger = -1
+	mobile_pull_mouse = false
+	mobile_pull_length = 0.0
+	mobile_pull_idle = 0.0
+	mobile_board_finger = -1
+	mobile_board_mouse_down = false
 	_mobile_fire_visual(false)
 	var striker := _get_striker()
 	striker["vel"] = direction.normalized() * lerpf(_shot_speed_min(), _shot_speed_max(), clampf(power, 0.0, 1.0))
@@ -1385,8 +1665,9 @@ func _next_board() -> void:
 
 func _open_rules() -> void:
 	_cancel_mobile_charge()
-	rules_overlay.visible = true
+	rules_overlay.show()
 	rules_overlay.move_to_front()
+	_mobile_sync()
 	sound_click.play()
 
 # The CPU searches for feasible contact points that send one of its discs
