@@ -10,13 +10,13 @@ config_version=5
 
 [application]
 
-config/name="CARROM | Classic Board"
+config/name="CARROM"
 config/description="Top-down 2D carrom with a mouse-first striker, classic rules and a shot-planning CPU."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 boot_splash/bg_color=Color(0, 0, 0, 1)
 boot_splash/stretch_mode=0
-boot_splash/image="uid://1fyjen1p2p4t"
+boot_splash/image="uid://dbd70kk1agqkh"
 config/icon="res://icon.svg"
 boot_splash/minimum_display_time=2000
 
@@ -29,6 +29,7 @@ window/size/window_width_override=1440
 window/size/window_height_override=900
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/handheld/orientation=1
 
 [gui]
 

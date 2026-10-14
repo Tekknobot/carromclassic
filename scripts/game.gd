@@ -199,6 +199,9 @@ var portrait_touch := false
 var mobile_score_panel: PanelContainer
 var mobile_match_label: Label
 var mobile_score_headings: Array[Label] = []
+var mobile_score_cards: Array[PanelContainer] = []
+var mobile_header_subtitle: Label
+var mobile_turn_accent: ColorRect
 var mobile_you: Label
 var mobile_cpu: Label
 var mobile_queen: Label
@@ -960,74 +963,126 @@ func _mobile_panel() -> PanelContainer:
 	add_child(panel)
 	return panel
 
+func _mobile_score_tile(parent: HBoxContainer, accent: Color) -> VBoxContainer:
+	var tile := PanelContainer.new()
+	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tile.size_flags_stretch_ratio = 1.0
+	var skin := _style(Color("#1d3a34"), Color("#41665a"), 14)
+	skin.content_margin_left = 6.0
+	skin.content_margin_right = 6.0
+	skin.content_margin_top = 7.0
+	skin.content_margin_bottom = 7.0
+	skin.border_width_top = 2
+	skin.border_color = accent.darkened(0.3)
+	tile.add_theme_stylebox_override("panel", skin)
+	parent.add_child(tile)
+	mobile_score_cards.append(tile)
+	var stack := VBoxContainer.new()
+	stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	stack.add_theme_constant_override("separation", 2)
+	tile.add_child(stack)
+	return stack
+
+func _mobile_game_tab_skin(b: Button, selected: bool, u: float) -> void:
+	# Independent segmented-tab treatment, intentionally not imposed on the
+	# hamburger menu, gamepad or desktop buttons.
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var fill := MINT if selected else Color("#1c3731")
+		if state == "pressed":
+			fill = Color("#66cbb3") if selected else Color("#294b41")
+		elif state == "hover" and not selected:
+			fill = Color("#28483e")
+		var skin := _style(fill, Color("#8ae0cc") if selected else Color("#45685d"), maxi(11, int(round(13.0 * u))))
+		skin.content_margin_left = 8.0 * u
+		skin.content_margin_right = 8.0 * u
+		skin.content_margin_top = 4.0 * u
+		skin.content_margin_bottom = 4.0 * u
+		b.add_theme_stylebox_override(state, skin)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	var ink := INK if selected else TEXT
+	for state in ["font_color", "font_hover_color", "font_pressed_color"]:
+		b.add_theme_color_override(state, ink)
+
 func _build_mobile_ui() -> void:
 	# Phone UI has its own hierarchy; no desktop sidebar is scaled onto a phone.
 	mobile_match_label = _mobile_label(self, "BOARD 1 / 8", 16, GOLD)
 	mobile_match_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	mobile_match_label.visible = false
-	# Flat, separate regions: mode, score, board, status, pull pad, theme, actions.
-	# No mobile input widgets ever sit on top of the physical board.
+	# The game screen is NOT a scaled desktop dock. Compact modular cards,
+	# deliberately different from the settings sheet, keep the board dominant.
+	mobile_header_subtitle = _mobile_label(self, "A TABLETOP CLASSIC", 10, MUTED)
+	mobile_header_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	mobile_header_subtitle.visible = false
+
+	# Three balanced tiles make both scores immediately readable. They sit on
+	# their own transparent surface rather than inside another large box.
 	mobile_score_panel = _mobile_panel()
+	mobile_score_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	var scores := HBoxContainer.new()
-	scores.add_theme_constant_override("separation", 7)
+	scores.add_theme_constant_override("separation", 6)
 	mobile_score_panel.add_child(scores)
-	var you_stack := VBoxContainer.new()
-	you_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	you_stack.add_theme_constant_override("separation", 4)
-	scores.add_child(you_stack)
-	mobile_score_headings.append(_mobile_label(you_stack, "YOU / WHITE", 13, MINT))
-	mobile_you = _mobile_label(you_stack, "0 / 9", 18, TEXT)
-	var queen_stack := VBoxContainer.new()
-	queen_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	queen_stack.add_theme_constant_override("separation", 4)
-	scores.add_child(queen_stack)
-	mobile_score_headings.append(_mobile_label(queen_stack, "QUEEN", 13, Color("#f28b8b")))
-	mobile_queen = _mobile_label(queen_stack, "ON BOARD", 11, TEXT)
-	var cpu_stack := VBoxContainer.new()
-	cpu_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	cpu_stack.add_theme_constant_override("separation", 4)
-	scores.add_child(cpu_stack)
-	mobile_score_headings.append(_mobile_label(cpu_stack, "CPU / BLACK", 13, GOLD))
-	mobile_cpu = _mobile_label(cpu_stack, "0 / 9", 18, TEXT)
+	var you_stack := _mobile_score_tile(scores, MINT)
+	mobile_score_headings.append(_mobile_label(you_stack, "YOU / WHITE", 12, MINT))
+	mobile_you = _mobile_label(you_stack, "0 PTS / 0", 19, TEXT)
+	var queen_stack := _mobile_score_tile(scores, Color("#e88683"))
+	mobile_score_headings.append(_mobile_label(queen_stack, "QUEEN", 12, Color("#e88683")))
+	mobile_queen = _mobile_label(queen_stack, "ON BOARD", 12, TEXT)
+	var cpu_stack := _mobile_score_tile(scores, GOLD)
+	mobile_score_headings.append(_mobile_label(cpu_stack, "CPU / BLACK", 12, GOLD))
+	mobile_cpu = _mobile_label(cpu_stack, "0 PTS / 0", 19, TEXT)
 
+	# Low-profile feedback. The colour rail communicates whose turn it is,
+	# leaving one quiet strip with an explicit action hint.
 	mobile_status_panel = _mobile_panel()
+	var status_row := HBoxContainer.new()
+	status_row.add_theme_constant_override("separation", 9)
+	mobile_status_panel.add_child(status_row)
+	mobile_turn_accent = ColorRect.new()
+	mobile_turn_accent.color = MINT
+	mobile_turn_accent.custom_minimum_size.x = 3.0
+	mobile_turn_accent.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_row.add_child(mobile_turn_accent)
 	var status_stack := VBoxContainer.new()
-	status_stack.add_theme_constant_override("separation", 4)
-	mobile_status_panel.add_child(status_stack)
-	mobile_status_title = _mobile_label(status_stack, "YOUR BREAK", 12, MINT)
-	mobile_status_hint = _mobile_label(status_stack, "SLIDE THE STRIKER ON THE BASELINE", 10, TEXT)
+	status_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	status_stack.add_theme_constant_override("separation", 2)
+	status_row.add_child(status_stack)
+	mobile_status_title = _mobile_label(status_stack, "YOUR BREAK", 15, MINT)
+	mobile_status_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	mobile_status_hint = _mobile_label(status_stack, "SLIDE STRIKER ON BASELINE", 12, TEXT)
+	mobile_status_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
+	# A compact, grounded pull control; the meter is ABOVE the pad. Exactly
+	# the existing input and drag-release shot mechanics remain in force.
 	mobile_power_panel = _mobile_panel()
-	# Vertical shot dock: the power label and full-width meter are above a
-	# compact, centered pull pad. The pad is NOT stretched across the screen.
 	var power_column := VBoxContainer.new()
 	power_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	power_column.add_theme_constant_override("separation", 7)
+	power_column.alignment = BoxContainer.ALIGNMENT_CENTER
+	power_column.add_theme_constant_override("separation", 5)
 	mobile_power_panel.add_child(power_column)
 	var power_stack := VBoxContainer.new()
 	power_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	power_stack.add_theme_constant_override("separation", 6)
+	power_stack.add_theme_constant_override("separation", 5)
 	power_column.add_child(power_stack)
-	mobile_power_label = _mobile_label(power_stack, "PULL BACK TO SHOOT", 15, TEXT)
+	mobile_power_label = _mobile_label(power_stack, "PULL BACK TO SHOOT", 14, MUTED)
+	mobile_power_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	mobile_power_meter = ProgressBar.new()
 	mobile_power_meter.min_value = 0.0
 	mobile_power_meter.max_value = 100.0
 	mobile_power_meter.show_percentage = false
-	mobile_power_meter.custom_minimum_size.y = 11.0
+	mobile_power_meter.custom_minimum_size.y = 9.0
 	mobile_power_meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mobile_power_meter.add_theme_stylebox_override("background", _style(Color("#102522"), Color.TRANSPARENT, 5))
-	mobile_power_meter.add_theme_stylebox_override("fill", _style(MINT, Color.TRANSPARENT, 5))
+	mobile_power_meter.add_theme_stylebox_override("background", _style(Color("#102522"), Color.TRANSPARENT, 7))
+	mobile_power_meter.add_theme_stylebox_override("fill", _style(MINT, Color.TRANSPARENT, 7))
 	power_stack.add_child(mobile_power_meter)
 	mobile_fire = _make_button(power_column, "PULL BACK", true)
-	mobile_fire.custom_minimum_size = Vector2(155, 74)
+	mobile_fire.custom_minimum_size = Vector2(204.0, 55.0)
 	mobile_fire.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	mobile_fire.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# The single pull gesture is captured globally, even when the finger
-	# moves beyond this visual pad. The pad itself is display-only.
+	# Global input captures pull/release even outside the decorative control.
 	mobile_fire.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# The unavailable state must remain readable while a player places the striker.
-	mobile_fire.add_theme_stylebox_override("disabled", _style(Color("#34594e"), EDGE, 9))
-	mobile_fire.add_theme_color_override("font_disabled_color", Color("#dcebe4"))
+	mobile_fire.add_theme_stylebox_override("disabled", _style(Color("#31584e"), EDGE_SOFT, 14))
+	mobile_fire.add_theme_color_override("font_disabled_color", TEXT)
 
 	# The menu trigger is the only additional button in the phone header.
 	# Drawn in code so no unsupported font glyphs or texture import are needed.
@@ -1271,7 +1326,10 @@ func _mobile_sync() -> void:
 	mobile_power_label.text = "POWER  %d%%" % int(round(charge_power * 100.0)) if phase == "charging" else "PULL BACK TO SHOOT"
 	mobile_power_meter.value = charge_power * 100.0 if phase == "charging" else 0.0
 	mobile_fire.disabled = phase not in ["aim", "charging"] or player_turn != 0 or rules_overlay.visible
-	mobile_match_label.text = "DUBOO / ONE BOARD" if duboo_mode else "BOARD %d / 8" % board_number
+	mobile_match_label.text = "DUBOO  /  01" if duboo_mode else "BOARD  %02d / %02d" % [board_number, MAX_BOARD_COUNT]
+	mobile_header_subtitle.text = "SLATE TABLE EDITION" if duboo_mode else "A TABLETOP CLASSIC"
+	mobile_turn_accent.color = MINT if player_turn == 0 else GOLD
+	mobile_status_title.add_theme_color_override("font_color", MINT if player_turn == 0 else GOLD)
 	_mobile_refresh_menu()
 
 func _mobile_fire_visual(held: bool) -> void:
@@ -1281,10 +1339,17 @@ func _mobile_fire_visual(held: bool) -> void:
 		_mobile_button_skin(mobile_fire, true, mobile_mobile_scale)
 	else:
 		_apply_button_skin(mobile_fire, true)
+	if portrait_touch:
+		for state in ["normal", "hover", "pressed", "disabled"]:
+			var skin := mobile_fire.get_theme_stylebox(state).duplicate() as StyleBoxFlat
+			skin.set_corner_radius_all(maxi(13, int(round(15.0 * mobile_mobile_scale))))
+			skin.content_margin_top = 4.0 * mobile_mobile_scale
+			skin.content_margin_bottom = 4.0 * mobile_mobile_scale
+			mobile_fire.add_theme_stylebox_override(state, skin)
 	if held:
-		var skin := _style(GOLD, Color("#fff2cf"), 11)
-		skin.content_margin_left = 12.0
-		skin.content_margin_right = 12.0
+		var skin := _style(GOLD, Color("#fff2cf"), 15)
+		skin.content_margin_left = 12.0 * mobile_mobile_scale
+		skin.content_margin_right = 12.0 * mobile_mobile_scale
 		mobile_fire.add_theme_stylebox_override("normal", skin)
 	mobile_fire.add_theme_color_override("font_color", INK)
 
@@ -1475,7 +1540,7 @@ func _refresh_mode_ui() -> void:
 	for b in [classic_button, duboo_button, desktop_classic_button, desktop_duboo_button]:
 		var selected = (b == duboo_button or b == desktop_duboo_button) if duboo_mode else (b == classic_button or b == desktop_classic_button)
 		if portrait_touch and (b == classic_button or b == duboo_button):
-			_mobile_button_skin(b, selected, mobile_mobile_scale)
+			_mobile_game_tab_skin(b, selected, mobile_mobile_scale)
 		else:
 			_apply_button_skin(b, selected)
 	# Reuse the original appearance selector for both modes. No extra controls.
@@ -1518,7 +1583,7 @@ func _layout() -> void:
 	if portrait_touch:
 		_layout_portrait(sz)
 		return
-	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_match_label, mobile_menu_button]:
+	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_match_label, mobile_menu_button, mobile_header_subtitle]:
 		mobile_node.visible = false
 	mobile_menu_scrim.hide()
 	mobile_menu_panel.hide()
@@ -1557,9 +1622,11 @@ func _layout() -> void:
 	rules_overlay.size = dialog_size
 
 func _layout_portrait(sz: Vector2) -> void:
-	# The board and score are always visible; ALL secondary controls live in
-	# the hamburger menu. Only the power display and pull pad sit below the board.
+	# Phone game view: one visual hierarchy -- identity, segmented modes,
+	# three match tiles, compact status, generous board, compact shot dock.
+	# The settings and Rules sheets continue to have separate implementations.
 	title_label.visible = true
+	mobile_header_subtitle.visible = true
 	mode_bar.visible = true
 	side_panel.visible = false
 	stats_panel.visible = false
@@ -1570,95 +1637,128 @@ func _layout_portrait(sz: Vector2) -> void:
 
 	var u := clampf(sz.x / 430.0, 0.72, 2.5)
 	mobile_mobile_scale = u
-	var gutter := 12.0 * u
-	var safe_top := 25.0 * u
-	var safe_bottom := 18.0 * u
-	var header_h := 48.0 * u
-	var mode_h := 47.0 * u
-	var scores_h := 67.0 * u
-	var status_h := 61.0 * u
-	# Enough vertical room for a stacked meter and the original-size shot pad.
-	var power_h := 142.0 * u
-	var gap := 10.0 * u
-	var max_board_width := sz.x - gutter * 2.0
-	var fixed_h := safe_top + header_h + mode_h + scores_h + status_h + power_h + safe_bottom + 4.0 * gap
-	# Short portrait devices can still fit a legible board; taller ones keep
-	# the board edge-to-edge and distribute the remaining vertical breathing room.
-	var board_width := minf(max_board_width, maxf(210.0 * u, sz.y - fixed_h))
-	var spare := maxf(0.0, sz.y - fixed_h - board_width)
-	var rhythm := gap + minf(spare / 4.0, 27.0 * u)
-	var leftover := maxf(0.0, spare - (rhythm - gap) * 4.0)
-	# The pull pad keeps its familiar footprint; distribute surplus space as
-	# breathing room rather than enlarging the button or its touch hitbox.
-	var dock_extra := minf(leftover * 0.38, 30.0 * u)
-	power_h += dock_extra
-	var extra_top := maxf(0.0, leftover - dock_extra) * 0.40
-	var y := safe_top + extra_top
+	var gutter := 10.0 * u
+	var safe_top := 14.0 * u
+	var safe_bottom := 12.0 * u
+	var header_h := 43.0 * u
+	var mode_h := 43.0 * u
+	var scores_h := 66.0 * u
+	var status_h := 43.0 * u
+	var power_h := 106.0 * u
+	var gap_header := 7.0 * u
+	var gap_modes := 8.0 * u
+	var gap_score := 5.0 * u
+	var gap_board := 9.0 * u
+	var gap_dock := 10.0 * u
+	var total_fixed := safe_top + safe_bottom + header_h + mode_h + scores_h + status_h + power_h + gap_header + gap_modes + gap_score + gap_board + gap_dock
+	var max_board_width := maxf(0.0, sz.x - 2.0 * gutter)
+	var board_width := minf(max_board_width, maxf(0.0, sz.y - total_fixed))
+	var spare := maxf(0.0, sz.y - total_fixed - board_width)
+	# Only taller aspect ratios receive extra space. Do not let spacers
+	# reduce the board or introduce the enormous gaps seen in the old menu.
+	var rhythm_add := minf(spare / 8.0, 13.0 * u)
+	var y := safe_top + maxf(0.0, spare - rhythm_add * 4.0) * 0.42
 
-	# Compact game identity / match indicator / 48px hamburger trigger.
-	title_label.position = Vector2(gutter + 2.0 * u, y)
-	title_label.size = Vector2(sz.x * 0.42, header_h)
-	title_label.add_theme_font_size_override("font_size", maxi(21, int(round(28.0 * u))))
-	mobile_menu_button.position = Vector2(sz.x - gutter - header_h, y)
-	mobile_menu_button.size = Vector2(header_h, header_h)
+	# Masthead: large single-word identity, understated subtitle and a
+	# framed menu trigger. No desktop assets or text get resized here.
+	title_label.position = Vector2(gutter + 1.0 * u, y - 3.0 * u)
+	title_label.size = Vector2(sz.x * 0.46, 29.0 * u)
+	title_label.add_theme_font_size_override("font_size", maxi(22, int(round(27.0 * u))))
+	mobile_header_subtitle.position = Vector2(gutter + 2.0 * u, y + 28.0 * u)
+	mobile_header_subtitle.size = Vector2(sz.x * 0.47, 14.0 * u)
+	mobile_header_subtitle.add_theme_font_size_override("font_size", maxi(10, int(round(10.0 * u))))
+	mobile_menu_button.position = Vector2(sz.x - gutter - 43.0 * u, y)
+	mobile_menu_button.size = Vector2(43.0 * u, 43.0 * u)
 	_mobile_button_skin(mobile_menu_button, false, u)
-	mobile_match_label.position = Vector2(sz.x * 0.45, y)
-	mobile_match_label.size = Vector2(sz.x * 0.55 - gutter - header_h - 5.0 * u, header_h)
-	mobile_match_label.add_theme_font_size_override("font_size", maxi(12, int(round(14.5 * u))))
-	y += header_h + rhythm
+	mobile_match_label.position = Vector2(sz.x * 0.49, y)
+	mobile_match_label.size = Vector2(sz.x * 0.51 - gutter - 49.0 * u, header_h)
+	mobile_match_label.add_theme_font_size_override("font_size", maxi(12, int(round(12.5 * u))))
+	y += header_h + gap_header + rhythm_add
 
+	# Segmented mode selector. 43 logical px on the standard phone; the
+	# selected tab is obvious but intentionally less dominant than the board.
 	mode_bar.position = Vector2(gutter, y)
-	mode_bar.size = Vector2(sz.x - gutter * 2.0, mode_h)
-	mode_bar.add_theme_constant_override("separation", maxi(8, int(round(9.0 * u))))
+	mode_bar.size = Vector2(sz.x - 2.0 * gutter, mode_h)
+	mode_bar.add_theme_constant_override("separation", maxi(6, int(round(7.0 * u))))
 	classic_button.custom_minimum_size.y = mode_h
 	duboo_button.custom_minimum_size.y = mode_h
-	classic_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
-	duboo_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
-	_mobile_button_skin(classic_button, not duboo_mode, u)
-	_mobile_button_skin(duboo_button, duboo_mode, u)
-	y += mode_h + rhythm
+	classic_button.add_theme_font_size_override("font_size", maxi(16, int(round(17.0 * u))))
+	duboo_button.add_theme_font_size_override("font_size", maxi(16, int(round(17.0 * u))))
+	_mobile_game_tab_skin(classic_button, not duboo_mode, u)
+	_mobile_game_tab_skin(duboo_button, duboo_mode, u)
+	y += mode_h + gap_modes + rhythm_add
 
+	# No nested slab: the three scoreboard tiles have equal-width lanes,
+	# individual borders and ample type-size at 360px through 1200px.
 	mobile_score_panel.position = Vector2(gutter, y)
-	mobile_score_panel.size = Vector2(sz.x - gutter * 2.0, scores_h)
+	mobile_score_panel.size = Vector2(sz.x - 2.0 * gutter, scores_h)
+	var score_row := mobile_score_panel.get_child(0) as HBoxContainer
+	score_row.add_theme_constant_override("separation", maxi(5, int(round(6.0 * u))))
+	for tile in mobile_score_cards:
+		var skin := tile.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+		skin.content_margin_left = 5.0 * u
+		skin.content_margin_right = 5.0 * u
+		skin.content_margin_top = 6.0 * u
+		skin.content_margin_bottom = 6.0 * u
+		skin.set_corner_radius_all(maxi(10, int(round(13.0 * u))))
+		skin.border_width_top = maxi(2, int(round(2.0 * u)))
+		tile.add_theme_stylebox_override("panel", skin)
+		(tile.get_child(0) as VBoxContainer).add_theme_constant_override("separation", maxi(2, int(round(3.0 * u))))
 	for heading in mobile_score_headings:
-		heading.add_theme_font_size_override("font_size", maxi(12, int(round(14.5 * u))))
-	mobile_you.add_theme_font_size_override("font_size", maxi(18, int(round(22.0 * u))))
-	mobile_cpu.add_theme_font_size_override("font_size", maxi(18, int(round(22.0 * u))))
-	mobile_queen.add_theme_font_size_override("font_size", maxi(12, int(round(16.0 * u))))
-	y += scores_h + 6.0 * u
+		heading.add_theme_font_size_override("font_size", maxi(12, int(round(11.8 * u))))
+	mobile_you.add_theme_font_size_override("font_size", maxi(16, int(round(18.5 * u))))
+	mobile_cpu.add_theme_font_size_override("font_size", maxi(16, int(round(18.5 * u))))
+	mobile_queen.add_theme_font_size_override("font_size", maxi(12, int(round(12.4 * u))))
+	y += scores_h + gap_score
 
-	# Game status belongs ABOVE the table, not among the bottom controls.
+	# Turn info is deliberately smaller than the board. Accent rail changes
+	# from mint to gold when the opponent takes control.
 	mobile_status_panel.position = Vector2(gutter, y)
-	mobile_status_panel.size = Vector2(sz.x - gutter * 2.0, status_h)
-	mobile_status_title.add_theme_font_size_override("font_size", maxi(16, int(round(17.5 * u))))
-	mobile_status_hint.add_theme_font_size_override("font_size", maxi(14, int(round(13.8 * u))))
-	y += status_h + 7.0 * u
+	mobile_status_panel.size = Vector2(sz.x - 2.0 * gutter, status_h)
+	var turn_skin := mobile_status_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	turn_skin.bg_color = Color("#19352f")
+	turn_skin.border_color = Color("#385c51")
+	turn_skin.content_margin_left = 11.0 * u
+	turn_skin.content_margin_right = 9.0 * u
+	turn_skin.content_margin_top = 4.0 * u
+	turn_skin.content_margin_bottom = 4.0 * u
+	turn_skin.set_corner_radius_all(maxi(10, int(round(12.0 * u))))
+	mobile_status_panel.add_theme_stylebox_override("panel", turn_skin)
+	var turn_row := mobile_status_panel.get_child(0) as HBoxContainer
+	turn_row.add_theme_constant_override("separation", maxi(8, int(round(10.0 * u))))
+	mobile_turn_accent.custom_minimum_size.x = 3.0 * u
+	mobile_status_title.add_theme_font_size_override("font_size", maxi(15, int(round(15.0 * u))))
+	mobile_status_hint.add_theme_font_size_override("font_size", maxi(12, int(round(11.5 * u))))
+	(mobile_status_title.get_parent() as VBoxContainer).add_theme_constant_override("separation", maxi(1, int(round(2.0 * u))))
+	y += status_h + gap_board + rhythm_add
 
-	var scale_value := board_width / 766.0
+	var board_scale := board_width / 766.0
 	var board_left := (sz.x - board_width) * 0.5
-	board.scale = Vector2.ONE * scale_value
-	board.position = Vector2(board_left + 43.0 * scale_value, y + 43.0 * scale_value)
-	y += board_width + rhythm
+	board.scale = Vector2.ONE * board_scale
+	board.position = Vector2(board_left + 43.0 * board_scale, y + 43.0 * board_scale)
+	y += board_width + gap_dock + rhythm_add
 
-	# One quiet control dock. No rules, difficulty, theme, or restart buttons.
+	# Short, deliberate shot dock, instead of the old 142px-tall slab. Bar
+	# stays immediately ABOVE a large central pull pad, preserving input rect.
 	mobile_power_panel.position = Vector2(gutter, y)
-	mobile_power_panel.size = Vector2(sz.x - gutter * 2.0, power_h)
-	# Scale the internal gaps along with the portrait layout so even narrow
-	# phones fit the bar above the touch target without clipping either.
+	mobile_power_panel.size = Vector2(sz.x - 2.0 * gutter, power_h)
 	var power_skin := mobile_power_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	power_skin.content_margin_left = 16.0 * u
-	power_skin.content_margin_right = 16.0 * u
-	power_skin.content_margin_top = 7.0 * u
-	power_skin.content_margin_bottom = 7.0 * u
+	power_skin.bg_color = Color("#1b3932")
+	power_skin.border_color = Color("#456b60")
+	power_skin.set_corner_radius_all(maxi(12, int(round(15.0 * u))))
+	power_skin.content_margin_left = 13.0 * u
+	power_skin.content_margin_right = 13.0 * u
+	power_skin.content_margin_top = 6.0 * u
+	power_skin.content_margin_bottom = 6.0 * u
 	mobile_power_panel.add_theme_stylebox_override("panel", power_skin)
 	var power_column := mobile_power_panel.get_child(0) as VBoxContainer
-	power_column.add_theme_constant_override("separation", maxi(4, int(round(7.0 * u))))
+	power_column.add_theme_constant_override("separation", maxi(3, int(round(5.0 * u))))
 	var power_stack := power_column.get_child(0) as VBoxContainer
-	power_stack.add_theme_constant_override("separation", maxi(3, int(round(6.0 * u))))
-	mobile_power_label.add_theme_font_size_override("font_size", maxi(15, int(round(18.0 * u))))
-	mobile_power_meter.custom_minimum_size.y = 13.0 * u
-	mobile_fire.custom_minimum_size = Vector2(155.0 * u, 74.0 * u)
-	mobile_fire.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
+	power_stack.add_theme_constant_override("separation", maxi(3, int(round(5.0 * u))))
+	mobile_power_label.add_theme_font_size_override("font_size", maxi(13, int(round(13.2 * u))))
+	mobile_power_meter.custom_minimum_size.y = 9.0 * u
+	mobile_fire.custom_minimum_size = Vector2(204.0 * u, 55.0 * u)
+	mobile_fire.add_theme_font_size_override("font_size", maxi(17, int(round(18.0 * u))))
 	_mobile_fire_visual(phase == "charging")
 
 	# Responsive portrait dialogs use the SAME pixel density as the game HUD.
