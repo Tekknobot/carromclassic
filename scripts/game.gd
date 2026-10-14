@@ -124,7 +124,15 @@ var aim_direction := Vector2.UP
 var cpu_time := 0.0
 var cpu_queued_shot: Dictionary = {}
 var cpu_skill := 1
-var rival_index := 0
+var rival_index := 0  # Selected opponent in normal play, BLACK in auto battle.
+var auto_rival_index := 0  # Different rival controlling WHITE in spectator mode.
+var white_score_heading: Label
+var black_score_heading: Label
+var rival_card_heading: Label
+var auto_rival_card: PanelContainer
+var auto_rival_portrait: TextureRect
+var auto_rival_name: Label
+var auto_rival_bio: Label
 var rival_results: Dictionary = {}  # classic_0 -> [player wins, CPU wins, draws]
 var rival_match_recorded := false
 var rival_portrait: TextureRect
@@ -547,13 +555,14 @@ func _stat_row(parent: Node, heading: String, accent: Color) -> Array[Label]:
 	meta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	meta.add_theme_constant_override("separation", 3)
 	row.add_child(meta)
-	_label(meta, heading, 11, accent)
+	var heading_label := _label(meta, heading, 11, accent)
+	heading_label.clip_text = true
 	var coins := _label(meta, "0 / 9 pocketed", 11, MUTED)
 	var score := _label(row, "0", 29, TEXT)
 	score.size_flags_horizontal = Control.SIZE_SHRINK_END
 	score.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	score.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	return [score, coins]
+	return [score, coins, heading_label]
 
 func _build_ui() -> void:
 	# Portrait keeps its familiar header and own mobile menu. These two
@@ -581,9 +590,11 @@ func _build_ui() -> void:
 	var white_card := _stat_row(scoreboard, "YOU / WHITE", MINT)
 	main_score_white = white_card[0]
 	coins_white = white_card[1]
+	white_score_heading = white_card[2]
 	var black_card := _stat_row(scoreboard, "CPU / BLACK", GOLD)
 	main_score_black = black_card[0]
 	coins_black = black_card[1]
+	black_score_heading = black_card[2]
 	var queens := PanelContainer.new()
 	queens.add_theme_stylebox_override("panel", _style(PANEL_ALT, EDGE_SOFT, 11))
 	stats.add_child(queens)
@@ -761,6 +772,7 @@ func _build_rival_drawer() -> void:
 	rival_quote_text = _label(speech, "", 12, TEXT, true)
 	rival_quote_text.custom_minimum_size.y = 48.0
 	rival_quote_box.hide()
+	_build_auto_rival_card(content)
 	_build_rival_card(content)
 	_refresh_rival_drawer_handle()
 
@@ -770,7 +782,7 @@ func _refresh_rival_drawer_handle() -> void:
 	if rival_drawer_open:
 		rival_drawer_handle.text = "BACK TO MATCH"
 	else:
-		rival_drawer_handle.text = "RIVAL  /  " + str(RIVALS[rival_index]["alias"])
+		rival_drawer_handle.text = "RIVALS  /  MATCHUP" if auto_battle else "RIVAL  /  " + str(RIVALS[rival_index]["alias"])
 	if rival_drawer_chevron != null:
 		rival_drawer_chevron.rotation = PI if rival_drawer_open else 0.0
 
@@ -792,16 +804,17 @@ func _animate_rival_drawer() -> void:
 	rival_drawer_tween.set_ease(Tween.EASE_OUT)
 	rival_drawer_tween.tween_property(rival_drawer, "position:y", _rival_drawer_target_y(), 0.27)
 
-func _show_rival_pocket_quote() -> void:
+func _show_rival_pocket_quote(actor: int) -> void:
 	if rival_quote_box == null:
 		return
-	var lines: Array = RIVAL_POCKET_QUOTES[rival_index]
-	var previous := int(rival_last_quote.get(rival_index, -1))
+	var actor_index := _rival_for_player(actor)
+	var lines: Array = RIVAL_POCKET_QUOTES[actor_index]
+	var previous := int(rival_last_quote.get(actor_index, -1))
 	var pick := randi_range(0, lines.size() - 1 if previous < 0 else lines.size() - 2)
 	if previous >= 0 and pick >= previous:
 		pick += 1
-	rival_last_quote[rival_index] = pick
-	rival_quote_heading.text = str(RIVALS[rival_index]["alias"]) + "  /  POCKETED"
+	rival_last_quote[actor_index] = pick
+	rival_quote_heading.text = str(RIVALS[actor_index]["alias"]) + "  /  POCKETED"
 	rival_quote_text.text = str(lines[pick])
 	rival_quote_box.show()
 	rival_drawer_scroll.scroll_vertical = 0
@@ -839,9 +852,33 @@ func _toggle_rival_drawer() -> void:
 	if sound_click != null:
 		sound_click.play()
 
+func _build_auto_rival_card(parent: VBoxContainer) -> void:
+	# The second rival uses the same roster portraits and shot personalities.
+	# This compact challenger card appears only for spectator matches.
+	auto_rival_card = PanelContainer.new()
+	auto_rival_card.add_theme_stylebox_override("panel", _style(PANEL_ALT, EDGE_SOFT, 10))
+	parent.add_child(auto_rival_card)
+	var lineup := HBoxContainer.new()
+	lineup.add_theme_constant_override("separation", 10)
+	auto_rival_card.add_child(lineup)
+	auto_rival_portrait = TextureRect.new()
+	auto_rival_portrait.custom_minimum_size = Vector2(75.0, 96.0)
+	auto_rival_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	auto_rival_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	auto_rival_portrait.clip_contents = true
+	lineup.add_child(auto_rival_portrait)
+	var details := VBoxContainer.new()
+	details.add_theme_constant_override("separation", 4)
+	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lineup.add_child(details)
+	_label(details, "WHITE / CHALLENGER", 10, MINT, true)
+	auto_rival_name = _label(details, "", 13, TEXT, true)
+	auto_rival_bio = _label(details, "", 10, MUTED, true)
+	auto_rival_card.hide()
+
 func _build_rival_card(parent: VBoxContainer) -> void:
 	# Fixed-width opponent card with vertically stacked identity.
-	_label(parent, "CLUB OPPONENT", 11, MINT)
+	rival_card_heading = _label(parent, "CLUB OPPONENT", 11, MINT)
 
 	var card := PanelContainer.new()
 	var skin := _style(PANEL_ALT, EDGE_SOFT, 10)
@@ -921,6 +958,21 @@ func _build_rival_card(parent: VBoxContainer) -> void:
 
 	_refresh_rival_card()
 
+func _rival_for_player(side: int) -> int:
+	# The existing black rival remains selected by PREV/NEXT.
+	# Auto battle assigns WHITE a separate identity and planning profile.
+	return auto_rival_index if auto_battle and side == 0 else rival_index
+
+func _rival_alias_for_player(side: int) -> String:
+	return str(RIVALS[_rival_for_player(side)]["alias"])
+
+func _choose_auto_rival() -> void:
+	# Never allow a rival to play against itself. Re-roll once per new match.
+	var opponent := randi_range(0, RIVALS.size() - 2)
+	if opponent >= rival_index:
+		opponent += 1
+	auto_rival_index = opponent
+
 func _rival_key() -> String:
 	return "%s_%d" % ["duboo" if duboo_mode else "classic", rival_index]
 
@@ -936,6 +988,17 @@ func _refresh_rival_card() -> void:
 	_refresh_rival_drawer_handle()
 	var results: Array = rival_results.get(_rival_key(), [0, 0, 0])
 	rival_record.text = "VS YOU  %d W  /  %d L  /  %d D" % [int(results[1]), int(results[0]), int(results[2])]
+	if auto_battle:
+		rival_record.text = "SPECTATOR / NO RECORD KEPT"
+	if rival_card_heading != null:
+		rival_card_heading.text = "BLACK / RIVAL" if auto_battle else "CLUB OPPONENT"
+	if auto_rival_card != null:
+		auto_rival_card.visible = auto_battle
+		if auto_battle:
+			var challenger: Dictionary = RIVALS[auto_rival_index]
+			auto_rival_portrait.texture = RIVAL_PORTRAITS[auto_rival_index]
+			auto_rival_name.text = str(challenger["alias"])
+			auto_rival_bio.text = str(challenger["name"])
 	if mobile_rival_name != null:
 		_mobile_refresh_menu()
 
@@ -1341,7 +1404,7 @@ func _mobile_refresh_menu() -> void:
 	if mobile_rival_name != null:
 		var selected: Dictionary = RIVALS[rival_index]
 		mobile_rival_name.text = str(selected["name"]) + "\n" + str(selected["alias"])
-		mobile_rival_bio.text = str(selected["bio"])
+		mobile_rival_bio.text = ("BLACK RIVAL / WHITE FACES %s" % _rival_alias_for_player(0)) if auto_battle else str(selected["bio"])
 	if mobile_menu_restart != null:
 		mobile_menu_restart.text = "NEW BOARD" if duboo_mode else "RESTART"
 	if mobile_menu_next_board != null:
@@ -1356,10 +1419,13 @@ func _mobile_sync() -> void:
 		return
 	mobile_you.text = "%d / 9" % _pocketed_count("white") if duboo_mode else "%d PTS / %d" % [totals[0], _pocketed_count("white")]
 	mobile_cpu.text = "%d / 9" % _pocketed_count("black") if duboo_mode else "%d PTS / %d" % [totals[1], _pocketed_count("black")]
+	if mobile_score_headings.size() >= 3:
+		mobile_score_headings[0].text = "WHITE\n%s" % _rival_alias_for_player(0) if auto_battle else "YOU / WHITE"
+		mobile_score_headings[2].text = "BLACK\n%s" % _rival_alias_for_player(1) if auto_battle else "CPU / BLACK"
 	if pending_queen >= 0:
-		mobile_queen.text = "COVER IT" if pending_queen == 0 else "CPU COVER"
+		mobile_queen.text = ("WHITE COVER" if pending_queen == 0 else "BLACK COVER") if auto_battle else ("COVER IT" if pending_queen == 0 else "CPU COVER")
 	elif queen_owner >= 0:
-		mobile_queen.text = "YOURS" if queen_owner == 0 else "CPU HAS IT"
+		mobile_queen.text = ("WHITE HAS IT" if queen_owner == 0 else "BLACK HAS IT") if auto_battle else ("YOURS" if queen_owner == 0 else "CPU HAS IT")
 	else:
 		mobile_queen.text = "ON BOARD"
 	mobile_status_title.text = status_title
@@ -1372,7 +1438,7 @@ func _mobile_sync() -> void:
 	elif phase == "moving":
 		mobile_status_hint.text = "WAIT FOR PIECES TO STOP"
 	elif phase in ["cpu_aim", "cpu_think", "cpu_search"]:
-		mobile_status_hint.text = "OPPONENT PLAYING"
+		mobile_status_hint.text = "RIVAL PLAYING" if auto_battle else "OPPONENT PLAYING"
 	elif phase == "board_over":
 		mobile_status_hint.text = "OPEN MENU TO CONTINUE"
 	else:
@@ -2184,7 +2250,7 @@ func _auto_begin_turn() -> void:
 	board.show_cpu_target = false
 	_place_striker(player_turn, 340.0)
 	cpu_time = 1.5
-	_set_status("AUTO BATTLE  /  WHITE" if player_turn == 0 else "AUTO BATTLE  /  BLACK", "Computer is preparing the next shot.")
+	_set_status("%s / %s" % [_rival_alias_for_player(player_turn), "WHITE" if player_turn == 0 else "BLACK"], "Rival is studying the board.")
 	_refresh_ui()
 	board.queue_redraw()
 
@@ -2202,23 +2268,40 @@ func _auto_mirror_state() -> Array:
 			disc["kind"] = "white"
 	return mirrored
 
+func _auto_mirror_owner(owner: int) -> int:
+	return 1 - owner if owner >= 0 else -1
+
 func _auto_cpu_search_start() -> void:
 	if not auto_battle or player_turn == 1:
 		_cpu_start_search()
 		return
 	var original := discs
+	var original_pending := pending_queen
+	var original_queen := queen_owner
 	discs = _auto_mirror_state()
+	# The planner is black-oriented. Its mirrored WHITE turn must also mirror
+	# Queen ownership so legal cover and score predictions stay correct.
+	pending_queen = _auto_mirror_owner(original_pending)
+	queen_owner = _auto_mirror_owner(original_queen)
 	_cpu_start_search()
 	discs = original
+	pending_queen = original_pending
+	queen_owner = original_queen
 
 func _auto_cpu_search_frame() -> void:
 	if not auto_battle or player_turn == 1:
 		_cpu_search_frame()
 		return
 	var original := discs
+	var original_pending := pending_queen
+	var original_queen := queen_owner
 	discs = _auto_mirror_state()
+	pending_queen = _auto_mirror_owner(original_pending)
+	queen_owner = _auto_mirror_owner(original_queen)
 	_cpu_search_frame()
 	discs = original
+	pending_queen = original_pending
+	queen_owner = original_queen
 	if phase == "cpu_aim":
 		_place_striker(0, float(cpu_queued_shot["x"]))
 
@@ -2238,6 +2321,9 @@ func _new_match() -> void:
 	pending_queen = -1
 	winner = -1
 	rival_match_recorded = false
+	if auto_battle:
+		_choose_auto_rival()
+	_refresh_rival_card()
 	_begin_board()
 
 func _begin_board() -> void:
@@ -2325,17 +2411,19 @@ func _refresh_ui() -> void:
 	coins_white.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("white")
 	coins_black.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("black")
 	if duboo_mode:
-		match_info.text = "DUBOO / ONE BOARD"
+		match_info.text = "DUBOO / RIVAL VS RIVAL" if auto_battle else "DUBOO / ONE BOARD"
 	elif MAX_BOARD_COUNT == 1:
-		match_info.text = "QUICK MATCH / ONE BOARD"
+		match_info.text = "RIVAL VS RIVAL / ONE BOARD" if auto_battle else "QUICK MATCH / ONE BOARD"
 	else:
 		match_info.text = "BOARD %d OF %d / FIRST TO %d" % [
 			board_number, MAX_BOARD_COUNT, MATCH_TARGET
 		]
+	white_score_heading.text = ("%s / WHITE" % _rival_alias_for_player(0)) if auto_battle else "YOU / WHITE"
+	black_score_heading.text = ("%s / BLACK" % _rival_alias_for_player(1)) if auto_battle else "CPU / BLACK"
 	if pending_queen != -1:
-		queen_text.text = "  QUEEN  /  %s MUST COVER" % ("YOU" if pending_queen == 0 else "CPU")
+		queen_text.text = "  QUEEN  /  %s MUST COVER" % (("WHITE" if pending_queen == 0 else "BLACK") if auto_battle else ("YOU" if pending_queen == 0 else "CPU"))
 	elif queen_owner != -1:
-		queen_text.text = "  QUEEN  /  COVERED BY %s" % ("YOU" if queen_owner == 0 else "CPU")
+		queen_text.text = "  QUEEN  /  COVERED BY %s" % (("WHITE" if queen_owner == 0 else "BLACK") if auto_battle else ("YOU" if queen_owner == 0 else "CPU"))
 	else:
 		queen_text.text = "  QUEEN  /  ON THE BOARD"
 	next_button.visible = phase == "board_over"
@@ -2673,7 +2761,7 @@ func _process(delta: float) -> void:
 		if cpu_time <= 0.0:
 			_auto_cpu_search_start()
 			phase = "cpu_search"
-			_set_status("CPU STUDYING BOARD", "The computer is considering its options.")
+			_set_status("%s IS THINKING" % _rival_alias_for_player(player_turn) if auto_battle else "CPU STUDYING BOARD", "The rival is planning a shot." if auto_battle else "The computer is considering its options.")
 	elif phase == "cpu_search":
 		if cpu_plan_active:
 			_auto_cpu_search_frame()
@@ -2707,7 +2795,7 @@ func _shoot(direction: Vector2, power: float) -> void:
 	board.charging = false
 	sound_shoot.pitch_scale = randf_range(0.98, 1.035) if duboo_mode else randf_range(0.98, 1.025)
 	sound_shoot.play()
-	_set_status("PIECES IN MOTION", "Watch the shot settle. Pocket your color to keep the turn.")
+	_set_status("PIECES IN MOTION", "%s took the shot. Watch the pieces settle." % _rival_alias_for_player(player_turn) if auto_battle else "Watch the shot settle. Pocket your color to keep the turn.")
 	_refresh_ui()
 	board.queue_redraw()
 
@@ -2793,7 +2881,7 @@ func _resolve_shot() -> void:
 		if pending_queen != -1 or queen_in_shot:
 			_respot_queen()
 		notices.append(_apply_striker_due(actor))
-		notices.append("Striker pocketed: foul. Your turn ends.")
+		notices.append("Striker pocketed: foul. Turn ends." if auto_battle else "Striker pocketed: foul. Your turn ends.")
 	else:
 		# The previous shot's Queen must be covered on this immediate shot.
 		if pending_queen == actor:
@@ -2822,8 +2910,8 @@ func _resolve_shot() -> void:
 	var actor_has_scored := own_after > own_count_before
 	# Only legitimate CPU progress earns a line. One line per scoring shot,
 	# including double pockets, with no interruptions over the board.
-	if actor == 1 and actor_has_scored and not striker_in_shot:
-		_show_rival_pocket_quote()
+	if (actor == 1 or auto_battle) and actor_has_scored and not striker_in_shot:
+		_show_rival_pocket_quote(actor)
 	if own_after >= 9:
 		if queen_owner != -1:
 			_end_board(actor, "All nine %s pieces pocketed!" % own_kind.to_upper())
@@ -2878,7 +2966,7 @@ func _end_board(board_winner: int, reason: String) -> void:
 			_record_rival_match(board_winner)
 		board.display_striker = false
 		board.show_aim = false
-		_set_status("YOU WIN DUBOO!" if board_winner == 0 else "CPU WINS DUBOO", reason + "  Select NEW BOARD to play again.")
+		_set_status("%s WINS DUBOO!" % _rival_alias_for_player(board_winner) if auto_battle else ("YOU WIN DUBOO!" if board_winner == 0 else "CPU WINS DUBOO"), reason + "  Select NEW BOARD to play again.")
 		_refresh_ui()
 		board.queue_redraw()
 		return
@@ -2893,7 +2981,8 @@ func _end_board(board_winner: int, reason: String) -> void:
 	phase = "board_over"
 	board.display_striker = false
 	board.show_aim = false
-	board_finished_message = "%s  +%d POINTS  |  %s" % ["YOU WIN THE BOARD!" if board_winner == 0 else "CPU WINS THE BOARD", gain, reason]
+	var board_winner_text := ("%s WINS THE BOARD!" % _rival_alias_for_player(board_winner)) if auto_battle else ("YOU WIN THE BOARD!" if board_winner == 0 else "CPU WINS THE BOARD")
+	board_finished_message = "%s  +%d POINTS  |  %s" % [board_winner_text, gain, reason]
 	var match_over := totals[board_winner] >= MATCH_TARGET or board_number >= MAX_BOARD_COUNT
 	if match_over:
 		phase = "match_over"
@@ -2901,9 +2990,9 @@ func _end_board(board_winner: int, reason: String) -> void:
 		if not auto_battle:
 			_record_rival_match(2 if totals[0] == totals[1] else match_winner)
 		if totals[0] == totals[1]:
-			_set_status("MATCH TIED", "Eight boards completed with equal points. Select NEW MATCH to play again.")
+			_set_status("RIVALS TIED" if auto_battle else "MATCH TIED", "Match ends level. Select NEW MATCH to play again." if auto_battle else "Eight boards completed with equal points. Select NEW MATCH to play again.")
 		else:
-			_set_status("YOU WIN THE MATCH!" if match_winner == 0 else "CPU WINS THE MATCH", board_finished_message + "  Select NEW MATCH to play again.")
+			_set_status("%s WINS!" % _rival_alias_for_player(match_winner) if auto_battle else ("YOU WIN THE MATCH!" if match_winner == 0 else "CPU WINS THE MATCH"), board_finished_message + "  Select NEW MATCH to play again.")
 	else:
 		_set_status("BOARD COMPLETE", board_finished_message + "  Select NEXT BOARD to continue.")
 	_refresh_ui()
@@ -3060,7 +3149,7 @@ func _cpu_start_search() -> void:
 	# Casual, Standard, Expert differ in BOTH search depth and shot precision.
 	var quotas: Array = [[7, 1, 1, 3], [12, 4, 3, 5], [19, 7, 6, 7]]
 	var limits: Array = (quotas[clampi(cpu_skill, 0, 2)] as Array).duplicate()
-	var quota_change: Array = RIVALS[rival_index]["quota"]
+	var quota_change: Array = RIVALS[_rival_for_player(player_turn)]["quota"]
 	for i in range(4):
 		limits[i] = maxi(0, int(limits[i]) + int(quota_change[i]))
 	_cpu_reserve_candidates(direct, int(limits[0]), 3)
@@ -3188,7 +3277,7 @@ func _cpu_predict(candidate: Dictionary) -> float:
 			"striker": fouled = true
 	var initial_black: int = _pocketed_count("black")
 	var score: float = 160.0 * own - 135.0 * other
-	var personality: Dictionary = RIVALS[rival_index]
+	var personality: Dictionary = RIVALS[_rival_for_player(player_turn)]
 	if own >= 2:
 		score += 42.0 * float(own - 1) * float(personality["multi"])
 	if fouled:
@@ -3264,5 +3353,5 @@ func _cpu_search_frame() -> void:
 	board.queue_redraw()
 	phase = "cpu_aim"
 	cpu_time = 0.60
-	_set_status("CPU AIMING", "%s is lining up a shot." % str(RIVALS[rival_index]["alias"]))
+	_set_status("%s AIMING" % _rival_alias_for_player(player_turn) if auto_battle else "CPU AIMING", "%s is lining up a shot." % _rival_alias_for_player(player_turn))
 	_refresh_ui()
