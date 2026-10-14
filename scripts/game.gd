@@ -105,6 +105,9 @@ var mobile_rules_cards: Array[PanelContainer] = []
 var rules_title_label: Label
 var board: CarromBoard
 var discs: Array = []
+var auto_battle := false
+var auto_battle_button: Button
+var auto_advance_time := -1.0
 var player_turn := 0
 var phase := "placement"
 var board_number := 1
@@ -672,6 +675,10 @@ func _build_ui() -> void:
 		_mobile_refresh_menu()
 	)
 	info.add_child(cpu_selector)
+	_sidebar_rule(info)
+	_label(info, "SPECTATOR", 11, MINT)
+	auto_battle_button = _make_button(info, "AUTO BATTLE  OFF")
+	auto_battle_button.pressed.connect(_toggle_auto_battle)
 	_sidebar_rule(info)
 	_label(info, "GAME INFO", 11, MINT)
 	tip_label = _label(info, "MOUSE: PLACE / AIM / HOLD TO POWER / RELEASE", 11, MUTED, true)
@@ -2161,6 +2168,60 @@ func _cycle_board_style(step: int) -> void:
 	if sound_click != null:
 		sound_click.play()
 
+func _toggle_auto_battle() -> void:
+	auto_battle = not auto_battle
+	auto_advance_time = -1.0
+	auto_battle_button.text = "AUTO BATTLE  ON" if auto_battle else "AUTO BATTLE  OFF"
+	_new_match()
+	if sound_click != null:
+		sound_click.play()
+
+func _auto_begin_turn() -> void:
+	phase = "cpu_think"
+	board.side = player_turn
+	board.display_striker = true
+	board.show_aim = false
+	board.show_cpu_target = false
+	_place_striker(player_turn, 340.0)
+	cpu_time = 1.5
+	_set_status("AUTO BATTLE  /  WHITE" if player_turn == 0 else "AUTO BATTLE  /  BLACK", "Computer is preparing the next shot.")
+	_refresh_ui()
+	board.queue_redraw()
+
+# Rotate the board and swap colors only inside the existing black-side CPU
+# planner. Its search remains identical for both sides and live discs are never
+# changed; white-side results are rotated back before execution.
+func _auto_mirror_state() -> Array:
+	var mirrored: Array = discs.duplicate(true)
+	for disc in mirrored:
+		disc["pos"] = Vector2(680.0, 680.0) - (disc["pos"] as Vector2)
+		disc["vel"] = -(disc["vel"] as Vector2)
+		if disc["kind"] == "white":
+			disc["kind"] = "black"
+		elif disc["kind"] == "black":
+			disc["kind"] = "white"
+	return mirrored
+
+func _auto_cpu_search_start() -> void:
+	if not auto_battle or player_turn == 1:
+		_cpu_start_search()
+		return
+	var original := discs
+	discs = _auto_mirror_state()
+	_cpu_start_search()
+	discs = original
+
+func _auto_cpu_search_frame() -> void:
+	if not auto_battle or player_turn == 1:
+		_cpu_search_frame()
+		return
+	var original := discs
+	discs = _auto_mirror_state()
+	_cpu_search_frame()
+	discs = original
+	if phase == "cpu_aim":
+		_place_striker(0, float(cpu_queued_shot["x"]))
+
 func _new_match() -> void:
 	rival_quote_peek = false
 	rival_quote_time = 0.0
@@ -2222,6 +2283,8 @@ func _begin_board() -> void:
 		_set_status("YOUR BREAK" if board_number == 1 else "YOUR TURN", "Slide the striker on the baseline, tap the board to aim, pull the grip left to shoot.")
 	else:
 		_set_status("CPU BREAK", "%s is studying the opening." % str(RIVALS[rival_index]["alias"]))
+	if auto_battle:
+		_auto_begin_turn()
 	_refresh_ui()
 	board.queue_redraw()
 
@@ -2524,7 +2587,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_close_rules()
 		return
-	if player_turn != 0 or phase not in ["placement", "aim", "charging"]:
+	if auto_battle or player_turn != 0 or phase not in ["placement", "aim", "charging"]:
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		var mouse := _screen_to_board()
@@ -2573,6 +2636,14 @@ func _process(delta: float) -> void:
 			return
 	if rules_overlay != null and rules_overlay.visible:
 		return
+	if auto_battle and phase == "board_over":
+		if auto_advance_time < 0.0:
+			auto_advance_time = 1.5
+		auto_advance_time -= delta
+		if auto_advance_time <= 0.0:
+			auto_advance_time = -1.0
+			_next_board()
+		return
 	if phase == "aim" or phase == "charging":
 		if portrait_touch and phase == "charging":
 			# Only the captured pull gesture can adjust mobile aim and power.
@@ -2600,12 +2671,12 @@ func _process(delta: float) -> void:
 	elif phase == "cpu_think":
 		cpu_time -= delta
 		if cpu_time <= 0.0:
-			_cpu_start_search()
+			_auto_cpu_search_start()
 			phase = "cpu_search"
 			_set_status("CPU STUDYING BOARD", "The computer is considering its options.")
 	elif phase == "cpu_search":
 		if cpu_plan_active:
-			_cpu_search_frame()
+			_auto_cpu_search_frame()
 	elif phase == "cpu_aim":
 		cpu_time -= delta
 		if cpu_time <= 0.0:
@@ -2775,7 +2846,9 @@ func _resolve_shot() -> void:
 			result = "Opponent piece pocketed. Turn passes."
 		else:
 			result = "No piece of your color pocketed. Turn passes."
-	if player_turn == 0:
+	if auto_battle:
+		_auto_begin_turn()
+	elif player_turn == 0:
 		phase = "aim" if portrait_touch else "placement"
 		mobile_board_finger = -1
 		board.display_striker = true
@@ -2801,7 +2874,8 @@ func _end_board(board_winner: int, reason: String) -> void:
 	winner = board_winner
 	if duboo_mode:
 		phase = "match_over"
-		_record_rival_match(board_winner)
+		if not auto_battle:
+			_record_rival_match(board_winner)
 		board.display_striker = false
 		board.show_aim = false
 		_set_status("YOU WIN DUBOO!" if board_winner == 0 else "CPU WINS DUBOO", reason + "  Select NEW BOARD to play again.")
@@ -2824,7 +2898,8 @@ func _end_board(board_winner: int, reason: String) -> void:
 	if match_over:
 		phase = "match_over"
 		var match_winner := 0 if totals[0] > totals[1] else 1
-		_record_rival_match(2 if totals[0] == totals[1] else match_winner)
+		if not auto_battle:
+			_record_rival_match(2 if totals[0] == totals[1] else match_winner)
 		if totals[0] == totals[1]:
 			_set_status("MATCH TIED", "Eight boards completed with equal points. Select NEW MATCH to play again.")
 		else:
@@ -3175,7 +3250,12 @@ func _cpu_search_frame() -> void:
 	selected["dir"] = (selected["dir"] as Vector2).rotated(randf_range(-drift, drift))
 	selected["speed"] = clampf(float(selected["speed"]) * randf_range(1.0 - drift * 1.3, 1.0 + drift * 1.3), _shot_speed_min(), _shot_speed_max())
 	cpu_queued_shot = selected
-	_place_striker(1, float(cpu_queued_shot["x"]))
+	if auto_battle and player_turn == 0:
+		cpu_queued_shot["x"] = 680.0 - float(cpu_queued_shot["x"])
+		cpu_queued_shot["dir"] = -(cpu_queued_shot["dir"] as Vector2)
+		cpu_queued_shot["target"] = Vector2(680.0, 680.0) - (cpu_queued_shot["target"] as Vector2)
+	_place_striker(player_turn if auto_battle else 1, float(cpu_queued_shot["x"]))
+	board.side = player_turn if auto_battle else 1
 	board.aim_direction = cpu_queued_shot["dir"]
 	board.aim_power = inverse_lerp(_shot_speed_min(), _shot_speed_max(), cpu_queued_shot["speed"])
 	board.show_aim = true
