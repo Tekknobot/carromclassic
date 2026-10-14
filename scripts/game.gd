@@ -121,6 +121,13 @@ var shot_duration := 0.0
 var charge_time := 0.0
 var charge_power := 0.25
 var aim_direction := Vector2.UP
+# Refresh the extra impact arrow at a modest rate; the original guide still
+# tracks the pointer every frame. This matters on slower browser/tablet GPUs.
+const IMPACT_PREVIEW_INTERVAL := 0.075
+var impact_preview_age := 1.0
+var impact_preview_last_direction := Vector2.ZERO
+var impact_preview_last_position := Vector2(-9999.0, -9999.0)
+var impact_preview_last_power := -1.0
 var cpu_time := 0.0
 var cpu_queued_shot: Dictionary = {}
 var cpu_skill := 1
@@ -2356,6 +2363,9 @@ func _begin_board() -> void:
 	board.display_striker = true
 	board.active_x = 340.0
 	board.show_aim = portrait_touch and player_turn == 0
+	board.impact_preview.clear()
+	impact_preview_age = 1.0
+	impact_preview_last_power = -1.0
 	board.charging = false
 	board.show_cpu_target = false
 	charge_time = 0.0
@@ -2751,6 +2761,7 @@ func _process(delta: float) -> void:
 			power_meter.value = charge_power * 100.0
 			board.charging = true
 		board.aim_power = charge_power
+		_update_impact_preview(delta)
 		board.queue_redraw()
 	elif phase == "placement" and not portrait_touch:
 		var mouse := _screen_to_board()
@@ -2769,6 +2780,23 @@ func _process(delta: float) -> void:
 		cpu_time -= delta
 		if cpu_time <= 0.0:
 			_shoot(cpu_queued_shot["dir"], inverse_lerp(_shot_speed_min(), _shot_speed_max(), cpu_queued_shot["speed"]))
+
+func _update_impact_preview(delta: float) -> void:
+	# The preview is a player aid, not an overlay for CPU or spectator shots.
+	if auto_battle or player_turn != 0 or not board.show_aim:
+		board.impact_preview.clear()
+		return
+	impact_preview_age += delta
+	var striker_position: Vector2 = _get_striker()["pos"]
+	var has_changed := striker_position.distance_squared_to(impact_preview_last_position) > 0.5 or aim_direction.distance_squared_to(impact_preview_last_direction) > 0.000012 or absf(charge_power - impact_preview_last_power) > 0.005
+	if not has_changed or impact_preview_age < IMPACT_PREVIEW_INTERVAL:
+		return
+	impact_preview_age = 0.0
+	impact_preview_last_position = striker_position
+	impact_preview_last_direction = aim_direction
+	impact_preview_last_power = charge_power
+	var shot_speed: float = lerpf(_shot_speed_min(), _shot_speed_max(), clampf(charge_power, 0.0, 1.0))
+	board.impact_preview = PHYSICS.predict_first_contact(discs, aim_direction, shot_speed, duboo_mode)
 
 func _shoot(direction: Vector2, power: float) -> void:
 	if direction.length_squared() < 0.5:
@@ -2791,6 +2819,7 @@ func _shoot(direction: Vector2, power: float) -> void:
 	rail_cooldown = 0.04
 	board.display_striker = false
 	board.show_aim = false
+	board.impact_preview.clear()
 	board.show_cpu_target = false
 	board.charging = false
 	sound_shoot.pitch_scale = randf_range(0.98, 1.035) if duboo_mode else randf_range(0.98, 1.025)

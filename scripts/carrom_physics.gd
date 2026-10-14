@@ -173,6 +173,120 @@ static func advance(discs: Array, dt: float, duboo: bool = false, feedback: Arra
 		disc["vel"] = velocity
 	return fallen
 
+# Predict only the first striker-to-counter impact. The striker's travel is
+# solved analytically until contact, then the existing impulse solver is used
+# for the actual impact. This avoids an expensive full-board shot simulation
+# whenever the player nudges the aim or adjusts power.
+static func _preview_ray_entry(origin: Vector2, direction: Vector2, center: Vector2, radius: float) -> float:
+	var toward: Vector2 = center - origin
+	var projected: float = toward.dot(direction)
+	if projected < 0.0:
+		return INF
+	var cross_squared: float = toward.length_squared() - projected * projected
+	var radius_squared: float = radius * radius
+	if cross_squared >= radius_squared:
+		return INF
+	return maxf(0.0, projected - sqrt(maxf(0.0, radius_squared - cross_squared)))
+
+static func _preview_rail_distance(origin: Vector2, direction: Vector2, radius: float) -> float:
+	var distance: float = INF
+	if direction.x > 0.00001:
+		distance = minf(distance, (SURFACE - radius - origin.x) / direction.x)
+	elif direction.x < -0.00001:
+		distance = minf(distance, (radius - origin.x) / direction.x)
+	if direction.y > 0.00001:
+		distance = minf(distance, (SURFACE - radius - origin.y) / direction.y)
+	elif direction.y < -0.00001:
+		distance = minf(distance, (radius - origin.y) / direction.y)
+	return maxf(0.0, distance)
+
+static func predict_first_contact(discs: Array, shot_direction: Vector2, shot_speed: float, duboo: bool = false) -> Dictionary:
+	if shot_direction.length_squared() < 0.5 or shot_speed <= 0.0:
+		return {}
+	var striker: Dictionary = {}
+	for piece in discs:
+		if piece["kind"] == "striker" and not piece["pocketed"]:
+			striker = piece
+			break
+	if striker.is_empty():
+		return {}
+	var direction: Vector2 = shot_direction.normalized()
+	var origin: Vector2 = striker["pos"]
+	var striker_radius: float = float(striker["radius"])
+	var striker_friction: float = DUBOO_RING_FRICTION if duboo else FRICTION
+	var stop_speed: float = DUBOO_MIN_SPEED if duboo else MIN_SPEED
+	var max_roll: float = maxf(0.0, (shot_speed * shot_speed - stop_speed * stop_speed) / (2.0 * striker_friction))
+	var nearest: float = minf(max_roll, _preview_rail_distance(origin, direction, striker_radius))
+	# In Classic, the striker can fall into a corner pocket before it hits a coin.
+	if not duboo:
+		for pocket in POCKETS:
+			nearest = minf(nearest, _preview_ray_entry(origin, direction, pocket, POCKET_RADIUS))
+	var target: Dictionary = {}
+	for piece in discs:
+		if piece["pocketed"] or piece["kind"] == "striker":
+			continue
+		var reach: float = striker_radius + float(piece["radius"])
+		var entry: float = _preview_ray_entry(origin, direction, piece["pos"], reach)
+		if entry < nearest:
+			nearest = entry
+			target = piece
+	if target.is_empty():
+		return {}
+	# Very soft tangencies do not give a useful visible prediction.
+	var impact_speed: float = sqrt(maxf(0.0, shot_speed * shot_speed - 2.0 * striker_friction * nearest))
+	if impact_speed < 40.0:
+		return {}
+
+	# Begin a couple of pixels before contact and ask the REAL collision solver
+	# for the outgoing velocity. Nothing in the live match state is modified.
+	var test: Array = discs.duplicate(true)
+	var test_striker: Dictionary = {}
+	var test_target: Dictionary = {}
+	for test_piece in test:
+		if test_piece["kind"] == "striker":
+			test_striker = test_piece
+		elif int(test_piece["id"]) == int(target["id"]):
+			test_target = test_piece
+	if test_striker.is_empty() or test_target.is_empty():
+		return {}
+	var before_impact: float = maxf(0.0, nearest - 1.25)
+	test_striker["pos"] = origin + direction * before_impact
+	test_striker["vel"] = direction * sqrt(maxf(0.0, shot_speed * shot_speed - 2.0 * striker_friction * before_impact))
+	var step_time: float = 1.0 / (240.0 if duboo else 120.0)
+	var outgoing_velocity := Vector2.ZERO
+	for _step in range(36):
+		advance(test, step_time, duboo)
+		outgoing_velocity = test_target["vel"]
+		if outgoing_velocity.length_squared() > 16.0:
+			break
+		if test_striker["pocketed"] or (test_striker["vel"] as Vector2).length_squared() < stop_speed * stop_speed:
+			return {}
+	if outgoing_velocity.length_squared() <= 16.0:
+		return {}
+
+	# With constant sliding friction, v^2 / (2a) is the travel distance.
+	# Stop this ONE straight arrow at the first obstruction, rail or pocket;
+	# later rebounds and chain reactions are intentionally not previewed.
+	var travel_direction: Vector2 = outgoing_velocity.normalized()
+	var coin_speed: float = outgoing_velocity.length()
+	var coin_friction: float = DUBOO_COIN_FRICTION if duboo else FRICTION
+	var coin_radius: float = float(target["radius"])
+	var impact_position: Vector2 = test_target["pos"]
+	var travel: float = maxf(0.0, (coin_speed * coin_speed - stop_speed * stop_speed) / (2.0 * coin_friction))
+	travel = minf(travel, _preview_rail_distance(impact_position, travel_direction, coin_radius))
+	for other in discs:
+		if other["pocketed"] or other["kind"] == "striker" or int(other["id"]) == int(target["id"]):
+			continue
+		travel = minf(travel, _preview_ray_entry(impact_position, travel_direction, other["pos"], coin_radius + float(other["radius"])))
+	if travel <= coin_radius + 15.0:
+		return {}
+	var pocket_radius: float = DUBOO_POCKET_RADIUS if duboo else POCKET_RADIUS
+	for pocket in POCKETS:
+		travel = minf(travel, _preview_ray_entry(impact_position, travel_direction, pocket, pocket_radius))
+	if travel <= coin_radius + 15.0:
+		return {}
+	return {"origin": target["pos"], "direction": travel_direction, "distance": travel, "radius": coin_radius}
+
 static func is_still(discs: Array) -> bool:
 	for disc in discs:
 		if not disc["pocketed"] and disc["vel"].length_squared() > 100.0:

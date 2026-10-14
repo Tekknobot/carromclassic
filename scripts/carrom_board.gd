@@ -77,6 +77,7 @@ var active_x: float = S / 2.0
 var show_aim := false
 var aim_direction := Vector2.UP
 var aim_power: float = 0.38
+var impact_preview: Dictionary = {}
 var charging := false
 var cpu_target := Vector2.ZERO
 var show_cpu_target := false
@@ -567,3 +568,29 @@ func _draw_aim() -> void:
 		draw_arc(start, CarromPhysics.DUBOO_STRIKER_RADIUS + 4.0 if duboo_mode else 28.0, -PI / 2.0, -PI / 2.0 + TAU * aim_power, 60, color, 5.0, true)
 	if show_cpu_target:
 		draw_arc(cpu_target, 24.0, 0, TAU, 48, Color(color, 0.43), 1.5, true)
+	_draw_impact_preview(color)
+
+# A single continuation arrow, drawn with the SAME dash spacing, width,
+# arrowhead geometry and palette as the existing aim guide.
+func _draw_impact_preview(color: Color) -> void:
+	if impact_preview.is_empty():
+		return
+	var origin: Vector2 = impact_preview["origin"]
+	var direction: Vector2 = impact_preview["direction"]
+	var travel: float = float(impact_preview["distance"])
+	var offset: float = float(impact_preview["radius"]) + 4.0
+	var line_length: float = travel - offset
+	if line_length < 18.0:
+		return
+	var line_start: Vector2 = origin + direction * offset
+	var line_end: Vector2 = origin + direction * travel
+	var dashed_length: float = maxf(0.0, line_length - 20.0)
+	for i in range(int(ceilf(dashed_length / 15.0))):
+		var along: float = float(i) * 15.0
+		var segment_length: float = minf(8.0, dashed_length - along)
+		if segment_length > 0.0:
+			var one: Vector2 = line_start + direction * along
+			draw_line(one, one + direction * segment_length, Color(color, 0.82), 2.5, true)
+	var tip: Vector2 = line_end - direction * 15.0
+	var wing: Vector2 = direction.orthogonal() * 8.0
+	draw_colored_polygon(PackedVector2Array([tip + direction * 15.0, tip - direction * 4.0 + wing, tip - direction * 4.0 - wing]), Color(color, 0.88))
