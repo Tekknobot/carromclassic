@@ -218,6 +218,9 @@ var mobile_menu_scrim: ColorRect
 var mobile_menu_panel: PanelContainer
 var mobile_menu_content: VBoxContainer
 var mobile_modal_scale := 1.0
+# A web phone can report a provisional viewport on the initial draw.
+# Reflow after containers and CSS/viewport dimensions have settled.
+var mobile_reflow_pending := false
 var mobile_menu_open := false
 var mobile_menu_style_name: Label
 var mobile_menu_style_count: Label
@@ -259,12 +262,34 @@ func _ready() -> void:
 	_new_match()
 	_layout()
 	get_window().focus_exited.connect(_cancel_mobile_charge)
+	get_viewport().size_changed.connect(_schedule_mobile_reflow)
+	_schedule_mobile_reflow()
 	queue_redraw()
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and is_node_ready():
 		_layout()
+		_schedule_mobile_reflow()
 		queue_redraw()
+
+func _schedule_mobile_reflow() -> void:
+	if mobile_reflow_pending or not is_inside_tree():
+		return
+	mobile_reflow_pending = true
+	_finish_mobile_reflow()
+
+func _finish_mobile_reflow() -> void:
+	# Godot's minimum-size propagation and mobile-browser viewport setup can
+	# each happen *after* _ready / NOTIFICATION_RESIZED. Wait for both frames.
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return
+	_layout()
+	await get_tree().process_frame
+	if is_inside_tree():
+		if portrait_touch:
+			_mobile_fit_dialogs()
+		mobile_reflow_pending = false
 
 func _draw() -> void:
 	var sz := size
@@ -1259,6 +1284,10 @@ func _mobile_open_menu() -> void:
 	mobile_menu_panel.show()
 	mobile_menu_scrim.move_to_front()
 	mobile_menu_panel.move_to_front()
+	# Opening a previously hidden Container changes its measured minimum.
+	# Always fit from the real portrait viewport, including the very first tap.
+	_layout()
+	_schedule_mobile_reflow()
 	if sound_click != null:
 		sound_click.play()
 
@@ -1295,6 +1324,9 @@ func _mobile_refresh_menu() -> void:
 		mobile_menu_restart.text = "NEW BOARD" if duboo_mode else "RESTART"
 	if mobile_menu_next_board != null:
 		mobile_menu_next_board.visible = phase == "board_over" and not duboo_mode
+	# Rival text and the NEXT BOARD action can change the dialog's minimum.
+	if mobile_menu_open and portrait_touch:
+		call_deferred("_mobile_fit_dialogs")
 
 
 func _mobile_sync() -> void:
@@ -1434,7 +1466,7 @@ func _build_rules_overlay() -> void:
 	mobile_rules_mode = _label(mobile_rules_content, "CLASSIC  /  QUICK GUIDE", 11, GOLD)
 	for i in range(6):
 		var section := PanelContainer.new()
-		section.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		section.size_flags_vertical = Control.SIZE_FILL
 		section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var skin := _style(PANEL_ALT, Color("#446b60"), 12)
 		skin.content_margin_left = 9.0
@@ -1488,7 +1520,9 @@ func _mobile_refresh_rules() -> void:
 			["SCORING", "Earn 1 point per opponent piece left. The Queen adds 3, or 1 at 22+ match points. One-board match."],
 			["TOUCH CONTROLS", touch]
 		]
-	var compact := portrait_touch and (size.x < 355.0 or size.y < 620.0)
+	# The guide intentionally becomes shorter *before* the dialog fills a
+	# phone's available height, rather than relying on a scroll view.
+	var compact := portrait_touch and (size.x < 410.0 or size.y < 900.0)
 	if compact:
 		if duboo_mode:
 			sections = [
@@ -1503,6 +1537,19 @@ func _mobile_refresh_rules() -> void:
 				["THE QUEEN", "Take one of yours first. Cover the Queen now or next shot, or it returns. Your first piece needs a later cover."],
 				["FOUL & SCORE", "Striker pocket ends your turn and costs a piece. Score pieces left; Queen adds 3 (1 at 22+)."],
 				["TOUCH CONTROLS", touch]
+			]
+	if portrait_touch and (size.y < 555.0 or size.x < 305.0):
+		if duboo_mode:
+			sections = [
+				["PLAY", "Pocket your nine pieces and the Queen. Pot yours to take another shot."],
+				["QUEEN & RING", "Take a piece first; cover the Queen now or next. The ring cannot be pocketed."],
+				["CONTROLS", "Slide on the baseline. Drag back on PULL BACK, then release to shoot."]
+			]
+		else:
+			sections = [
+				["PLAY", "Pocket nine white pieces. Pot yours to play again; cover the Queen now or next."],
+				["FOUL & SCORE", "A pocketed striker costs a piece and ends your turn. Count remaining CPU pieces; Queen adds points."],
+				["CONTROLS", "Slide on the baseline. Drag back on PULL BACK, then release to shoot."]
 			]
 	for i in range(mobile_rules_cards.size()):
 		mobile_rules_cards[i].visible = i < sections.size()
@@ -1761,57 +1808,77 @@ func _layout_portrait(sz: Vector2) -> void:
 	mobile_fire.add_theme_font_size_override("font_size", maxi(17, int(round(18.0 * u))))
 	_mobile_fire_visual(phase == "charging")
 
-	# Responsive portrait dialogs use the SAME pixel density as the game HUD.
-	# They occupy separate, centered sheets with a content-specific height.
-	# In particular, do NOT cap the text at 1.22 when the UI is at 2.4x.
+	# Prepare fonts and content first. Dialog geometry comes from the actual
+	# minimum size *after* typography, buttons and visibility have changed.
 	mobile_menu_scrim.position = Vector2.ZERO
 	mobile_menu_scrim.size = sz
-	var modal_u := clampf(minf(sz.x / 430.0, sz.y / 760.0), 0.72, 2.5)
+	var modal_u := clampf(minf(sz.x / 430.0, sz.y / 760.0), 0.76, 2.5)
 	mobile_modal_scale = modal_u
-	var modal_gutter := maxf(9.0, 12.0 * modal_u)
-	var modal_top := maxf(8.0, 12.0 * modal_u)
-	var modal_bottom := maxf(8.0, 12.0 * modal_u)
-	var available_h := maxf(0.0, sz.y - modal_top - modal_bottom)
-	var modal_w := maxf(0.0, sz.x - 2.0 * modal_gutter)
-
-	# A deliberately COMPACT settings sheet. No filler gaps, no scrollbar,
-	# and no drifting controls even on very tall phones.
-	var menu_h := minf(available_h, 505.0 * modal_u)
-	mobile_menu_panel.position = Vector2(modal_gutter, modal_top + (available_h - menu_h) * 0.5)
-	mobile_menu_panel.size = Vector2(modal_w, menu_h)
-	var menu_skin := mobile_menu_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	menu_skin.content_margin_left = 15.0 * modal_u
-	menu_skin.content_margin_right = 15.0 * modal_u
-	menu_skin.content_margin_top = 14.0 * modal_u
-	menu_skin.content_margin_bottom = 14.0 * modal_u
-	mobile_menu_panel.add_theme_stylebox_override("panel", menu_skin)
 	_mobile_menu_layout(modal_u)
-
-	# Rules get their OWN taller canvas and larger paragraph type. It contains
-	# six cards without a ScrollContainer; desktop keeps its full rules page.
-	var rules_h := minf(available_h, 708.0 * modal_u)
-	rules_overlay.position = Vector2(modal_gutter, modal_top + (available_h - rules_h) * 0.5)
-	rules_overlay.size = Vector2(modal_w, rules_h)
-	var rules_skin := rules_overlay.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	rules_skin.content_margin_left = 12.0 * modal_u
-	rules_skin.content_margin_right = 12.0 * modal_u
-	rules_skin.content_margin_top = 12.0 * modal_u
-	rules_skin.content_margin_bottom = 12.0 * modal_u
-	rules_overlay.add_theme_stylebox_override("panel", rules_skin)
 	_mobile_rules_layout(modal_u)
+	_mobile_fit_dialogs()
 	_mobile_sync()
+
+func _mobile_fit_dialogs() -> void:
+	if not portrait_touch or mobile_menu_panel == null or rules_overlay == null:
+		return
+	var sz := size
+	if sz.x <= 0.0 or sz.y <= 0.0:
+		return
+	# Physical canvas bounds, not the old fixed 505/708 logical-pixel caps.
+	# Both panels fit independently, even at initial load or after an on-screen
+	# browser toolbar changes the viewport. No ScrollContainer is introduced.
+	var u := mobile_modal_scale
+	var edge_x := maxf(8.0, 11.0 * u)
+	var edge_y := maxf(8.0, 10.0 * u)
+	var safe := Rect2(Vector2(edge_x, edge_y), sz - Vector2(edge_x * 2.0, edge_y * 2.0))
+	if safe.size.x < 1.0 or safe.size.y < 1.0:
+		return
+	_mobile_fit_panel(mobile_menu_panel, safe, 505.0 * u)
+	_mobile_fit_panel(rules_overlay, safe, 708.0 * u)
+
+func _mobile_fit_panel(panel: PanelContainer, safe: Rect2, ideal_h: float) -> void:
+	# Crucial: Godot enforces minimum sizes from child Labels and Buttons.
+	# Measuring those sizes AFTER applying fonts fixes the one-time giant menu
+	# that only corrected itself when a desktop window was nudged.
+	panel.pivot_offset = Vector2.ZERO
+	panel.scale = Vector2.ONE
+	var content_min := panel.get_combined_minimum_size()
+	var logical_w := maxf(safe.size.x, content_min.x)
+	var logical_h := maxf(content_min.y + 2.0, minf(ideal_h, safe.size.y))
+	# The last-resort uniform fit handles even 320x568 (or shorter browser
+	# viewports) without clipping controls or creating a scrollbar.
+	var fit := minf(1.0, minf(safe.size.x / logical_w, safe.size.y / logical_h))
+	panel.size = Vector2(logical_w, logical_h)
+	panel.scale = Vector2.ONE * fit
+	var drawn := Vector2(logical_w, logical_h) * fit
+	panel.position = safe.position + (safe.size - drawn) * 0.5
 
 func _mobile_menu_layout(u: float) -> void:
 	# Important: no scrolling and no expand-fill spacer. Use a clear vertical
 	# hierarchy of one title, three setting groups and two large actions.
 	var content := mobile_menu_content
+	# Optional decoration yields to real touch controls on short phones.
+	var short_screen := size.y < 680.0
+	var ultra_short := size.y < 575.0
+	(content.get_node("MenuFootnote") as Label).visible = not short_screen
+	mobile_rival_bio.visible = not ultra_short
+	(content.get_node("MenuRivalDivider") as HSeparator).visible = not ultra_short
+	(content.get_node("MenuActionsDivider") as HSeparator).visible = not ultra_short
+	var menu_skin := mobile_menu_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	menu_skin.content_margin_left = 13.0 * u
+	menu_skin.content_margin_right = 13.0 * u
+	menu_skin.content_margin_top = (10.0 if short_screen else 14.0) * u
+	menu_skin.content_margin_bottom = (10.0 if short_screen else 14.0) * u
+	mobile_menu_panel.add_theme_stylebox_override("panel", menu_skin)
 	content.alignment = BoxContainer.ALIGNMENT_CENTER
-	content.add_theme_constant_override("separation", maxi(5, int(round(7.0 * u))))
+	content.add_theme_constant_override("separation", maxi(3, int(round((5.0 if short_screen else 7.0) * u))))
 	var header := content.get_child(0) as HBoxContainer
 	var heading_stack := header.get_child(0) as VBoxContainer
 	heading_stack.add_theme_constant_override("separation", maxi(1, int(round(2.0 * u))))
 	var header_title := heading_stack.get_child(0) as Label
 	var header_subtitle := heading_stack.get_child(1) as Label
+	header_subtitle.visible = not ultra_short
 	header_title.add_theme_font_size_override("font_size", maxi(23, int(round(23.0 * u))))
 	header_subtitle.add_theme_font_size_override("font_size", maxi(13, int(round(11.5 * u))))
 	var close := header.get_child(1) as Button
@@ -1874,6 +1941,12 @@ func _mobile_rules_layout(u: float) -> void:
 	if mobile_rules_content == null:
 		return
 	_mobile_refresh_rules()
+	var rules_skin := rules_overlay.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	rules_skin.content_margin_left = 11.0 * u
+	rules_skin.content_margin_right = 11.0 * u
+	rules_skin.content_margin_top = 10.0 * u
+	rules_skin.content_margin_bottom = 10.0 * u
+	rules_overlay.add_theme_stylebox_override("panel", rules_skin)
 	var column := rules_overlay.get_child(0) as VBoxContainer
 	column.add_theme_constant_override("separation", maxi(4, int(round(8.0 * u))))
 	var header := column.get_child(0) as HBoxContainer
@@ -2629,6 +2702,9 @@ func _open_rules() -> void:
 	_mobile_refresh_rules()
 	rules_overlay.show()
 	rules_overlay.move_to_front()
+	if portrait_touch:
+		_layout()
+		_schedule_mobile_reflow()
 	_mobile_sync()
 	sound_click.play()
 
