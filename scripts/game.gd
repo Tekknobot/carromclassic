@@ -96,6 +96,13 @@ var desktop_duboo_button: Button
 var style_heading: Label
 var style_selector: HBoxContainer
 var rules_body: Label
+var desktop_rules_scroll: ScrollContainer
+var mobile_rules_content: VBoxContainer
+var mobile_rules_mode: Label
+var mobile_rules_titles: Array[Label] = []
+var mobile_rules_descriptions: Array[Label] = []
+var mobile_rules_cards: Array[PanelContainer] = []
+var rules_title_label: Label
 var board: CarromBoard
 var discs: Array = []
 var player_turn := 0
@@ -206,6 +213,8 @@ var mobile_fire: Button
 var mobile_menu_button: Button
 var mobile_menu_scrim: ColorRect
 var mobile_menu_panel: PanelContainer
+var mobile_menu_content: VBoxContainer
+var mobile_modal_scale := 1.0
 var mobile_menu_open := false
 var mobile_menu_style_name: Label
 var mobile_menu_style_count: Label
@@ -941,11 +950,11 @@ func _mobile_label(parent: Node, value: String, font_size: int, color: Color) ->
 
 func _mobile_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
-	var skin := _style(Color("#1d3b35"), EDGE, 11)
-	skin.content_margin_left = 16.0
-	skin.content_margin_right = 16.0
-	skin.content_margin_top = 7.0
-	skin.content_margin_bottom = 7.0
+	var skin := _style(Color("#1c3933"), Color("#48685e"), 13)
+	skin.content_margin_left = 13.0
+	skin.content_margin_right = 13.0
+	skin.content_margin_top = 8.0
+	skin.content_margin_bottom = 8.0
 	panel.add_theme_stylebox_override("panel", skin)
 	panel.visible = false
 	add_child(panel)
@@ -1032,14 +1041,14 @@ func _build_mobile_ui() -> void:
 	# An outside tap dismisses the menu. Scrim and sheet intercept all input,
 	# while the existing gesture-owned pull pad stays completely separate.
 	mobile_menu_scrim = ColorRect.new()
-	mobile_menu_scrim.color = Color(0.02, 0.08, 0.07, 0.78)
+	mobile_menu_scrim.color = Color(0.01, 0.06, 0.05, 0.83)
 	mobile_menu_scrim.mouse_filter = Control.MOUSE_FILTER_STOP
 	mobile_menu_scrim.visible = false
 	mobile_menu_scrim.gui_input.connect(_mobile_menu_outside_input)
 	add_child(mobile_menu_scrim)
 
 	mobile_menu_panel = PanelContainer.new()
-	var menu_skin := _style(Color("#1b3731"), Color("#719889"), 18)
+	var menu_skin := _style(Color("#1b3832"), Color("#719889"), 19)
 	menu_skin.content_margin_left = 19.0
 	menu_skin.content_margin_right = 19.0
 	menu_skin.content_margin_top = 20.0
@@ -1051,14 +1060,15 @@ func _build_mobile_ui() -> void:
 	mobile_menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	mobile_menu_panel.visible = false
 	add_child(mobile_menu_panel)
-	var menu_scroll := ScrollContainer.new()
-	menu_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	menu_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	mobile_menu_panel.add_child(menu_scroll)
-	var menu_content := VBoxContainer.new()
-	menu_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	menu_content.add_theme_constant_override("separation", 12)
-	menu_scroll.add_child(menu_content)
+	# Portrait-only settings sheet: every item is in one readable, non-scrolling
+	# column. Blank space is reserved around the entire composition, NEVER
+	# inserted between its controls.
+	mobile_menu_content = VBoxContainer.new()
+	mobile_menu_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mobile_menu_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mobile_menu_content.add_theme_constant_override("separation", 8)
+	mobile_menu_panel.add_child(mobile_menu_content)
+	var menu_content := mobile_menu_content
 
 	var heading_row := HBoxContainer.new()
 	heading_row.add_theme_constant_override("separation", 10)
@@ -1084,6 +1094,7 @@ func _build_mobile_ui() -> void:
 	var design_heading := _label(menu_content, "BOARD DESIGN", 12, MINT)
 	design_heading.name = "MenuDesignTitle"
 	var design_panel := PanelContainer.new()
+	design_panel.name = "MenuDesignPanel"
 	var design_skin := _style(Color("#24463e"), EDGE_SOFT, 12)
 	design_skin.content_margin_left = 7.0
 	design_skin.content_margin_right = 7.0
@@ -1122,6 +1133,7 @@ func _build_mobile_ui() -> void:
 		mobile_menu_difficulties.append(b)
 
 	var rival_divider := HSeparator.new()
+	rival_divider.name = "MenuRivalDivider"
 	rival_divider.add_theme_color_override("color", EDGE_SOFT)
 	menu_content.add_child(rival_divider)
 	_label(menu_content, "YOUR RIVAL", 12, MINT)
@@ -1141,6 +1153,7 @@ func _build_mobile_ui() -> void:
 	mobile_rival_bio = _label(menu_content, "", 12, MUTED, true)
 
 	var actions_divider := HSeparator.new()
+	actions_divider.name = "MenuActionsDivider"
 	actions_divider.add_theme_color_override("color", EDGE_SOFT)
 	menu_content.add_child(actions_divider)
 	var actions := HBoxContainer.new()
@@ -1160,8 +1173,12 @@ func _build_mobile_ui() -> void:
 		_mobile_close_menu()
 		_next_board()
 	)
-	var footnote := _mobile_label(menu_content, "CHANGES APPLY IMMEDIATELY", 11, MUTED)
+	var footnote := _mobile_label(menu_content, "NEW RIVAL STARTS A FRESH MATCH", 11, MUTED)
 	footnote.name = "MenuFootnote"
+	footnote.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# No expanding spacer nodes: they formerly pushed the rival, Rules and
+	# Restart controls entirely below the screen on high-density phones.
+	menu_content.alignment = BoxContainer.ALIGNMENT_CENTER
 	_mobile_refresh_menu()
 
 func _mobile_menu_outside_input(event: InputEvent) -> void:
@@ -1214,11 +1231,11 @@ func _mobile_refresh_menu() -> void:
 	mobile_menu_style_name.text = str(names[index])
 	mobile_menu_style_count.text = "%02d / %02d" % [index + 1, names.size()]
 	for i in range(mobile_menu_difficulties.size()):
-		_mobile_button_skin(mobile_menu_difficulties[i], i == cpu_skill, mobile_mobile_scale)
+		_mobile_button_skin(mobile_menu_difficulties[i], i == cpu_skill, mobile_modal_scale)
 	if mobile_rival_name != null:
 		var selected: Dictionary = RIVALS[rival_index]
 		mobile_rival_name.text = str(selected["name"]) + "\n" + str(selected["alias"])
-		mobile_rival_bio.text = str(selected["bio"]) + "  Changing rivals starts a fresh match."
+		mobile_rival_bio.text = str(selected["bio"])
 	if mobile_menu_restart != null:
 		mobile_menu_restart.text = "NEW BOARD" if duboo_mode else "RESTART"
 	if mobile_menu_next_board != null:
@@ -1238,9 +1255,9 @@ func _mobile_sync() -> void:
 		mobile_queen.text = "ON BOARD"
 	mobile_status_title.text = status_title
 	if phase == "placement":
-		mobile_status_hint.text = "MOVE STRIKER ON THE LOWER BASELINE"
+		mobile_status_hint.text = "SLIDE STRIKER ON BASELINE"
 	elif phase == "aim":
-		mobile_status_hint.text = "PULL BACK, THEN RELEASE"
+		mobile_status_hint.text = "DRAG BACK TO AIM AND SHOOT"
 	elif phase == "charging":
 		mobile_status_hint.text = "RELEASE TO SHOOT"
 	elif phase == "moving":
@@ -1302,47 +1319,131 @@ func _score_card(parent: Node, heading: String, accent: Color) -> Array[Label]:
 	return [score, sub]
 
 func _build_rules_overlay() -> void:
-	# A fixed header and footer keep dismiss actions visible while the long
-	# instructions scroll independently; important on narrow touch screens.
+	# Desktop retains its detailed scrollable reference. Portrait has a
+	# separately typeset, concise six-section guide that never scrolls.
 	rules_overlay = PanelContainer.new()
 	rules_overlay.visible = false
 	rules_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	var panel_skin := _style(Color("#19332f"), MINT, 14)
-	panel_skin.content_margin_left = 13.0
-	panel_skin.content_margin_right = 13.0
-	panel_skin.content_margin_top = 13.0
-	panel_skin.content_margin_bottom = 13.0
+	var panel_skin := _style(Color("#193630"), Color("#719889"), 19)
+	panel_skin.content_margin_left = 14.0
+	panel_skin.content_margin_right = 14.0
+	panel_skin.content_margin_top = 14.0
+	panel_skin.content_margin_bottom = 14.0
 	rules_overlay.add_theme_stylebox_override("panel", panel_skin)
 	add_child(rules_overlay)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 12)
+	column.add_theme_constant_override("separation", 10)
 	rules_overlay.add_child(column)
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 12)
+	header.add_theme_constant_override("separation", 10)
 	column.add_child(header)
-	var title := _label(header, "CARROM  /  RULES", 22, MINT)
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	rules_title_label = _label(header, "CARROM  /  RULES", 21, MINT)
+	rules_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	rules_close_button = _make_button(header, "CLOSE", true)
 	rules_close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
-	rules_close_button.custom_minimum_size = Vector2(104, 48)
+	rules_close_button.custom_minimum_size = Vector2(94, 46)
 	rules_close_button.pressed.connect(_close_rules)
 	var separator := HSeparator.new()
+	separator.add_theme_color_override("color", EDGE_SOFT)
 	column.add_child(separator)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_child(scroll)
-	var v := VBoxContainer.new()
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 12)
-	scroll.add_child(v)
-	rules_body = _label(v,
+
+	desktop_rules_scroll = ScrollContainer.new()
+	desktop_rules_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	desktop_rules_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	desktop_rules_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_child(desktop_rules_scroll)
+	var details := VBoxContainer.new()
+	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	details.add_theme_constant_override("separation", 12)
+	desktop_rules_scroll.add_child(details)
+	rules_body = _label(details,
 		"OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nWhite breaks. You keep shooting whenever you pocket at least one of your own pieces; otherwise the turn passes. Opponent pieces remain pocketed if you sink them.\n\nTHE QUEEN\nYou must pocket one of your own pieces before you can claim the Queen. Pocket the Queen and one of your own pieces in the same shot, or pocket your own piece on your very next shot to cover it. An uncovered Queen returns to the center. If you capture the Queen together with your very first piece, a further cover is required.\n\nSTRIKER FOUL\nPocketing the striker costs one of your previously pocketed pieces (or incurs one owed piece if none is available), and ends your turn.\n\nSCORING\nThe board winner scores one point for each opponent piece left on the board. The Queen adds three points if secured by the winner, or one when their pre-board match score is at least 22. First to 25 points or the leader after eight boards wins.\n\nThis is a playable standard-rules adaptation: specialist referee calls and uncommon compound fouls are simplified.",
 		14, TEXT, true)
+
+	mobile_rules_content = VBoxContainer.new()
+	mobile_rules_content.visible = false
+	mobile_rules_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mobile_rules_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mobile_rules_content.add_theme_constant_override("separation", 7)
+	column.add_child(mobile_rules_content)
+	mobile_rules_mode = _label(mobile_rules_content, "CLASSIC  /  QUICK GUIDE", 11, GOLD)
+	for i in range(6):
+		var section := PanelContainer.new()
+		section.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var skin := _style(PANEL_ALT, Color("#446b60"), 12)
+		skin.content_margin_left = 9.0
+		skin.content_margin_right = 9.0
+		skin.content_margin_top = 6.0
+		skin.content_margin_bottom = 6.0
+		section.add_theme_stylebox_override("panel", skin)
+		mobile_rules_content.add_child(section)
+		mobile_rules_cards.append(section)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 9)
+		section.add_child(row)
+		var number := _label(row, "%02d" % (i + 1), 12, GOLD)
+		number.custom_minimum_size.x = 22.0
+		number.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		var copy := VBoxContainer.new()
+		copy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		copy.alignment = BoxContainer.ALIGNMENT_CENTER
+		copy.add_theme_constant_override("separation", 2)
+		row.add_child(copy)
+		mobile_rules_titles.append(_label(copy, "", 12, MINT))
+		mobile_rules_descriptions.append(_label(copy, "", 12, TEXT, true))
+
 	rules_footer_button = _make_button(column, "RETURN TO GAME", true)
 	rules_footer_button.custom_minimum_size.y = 50.0
 	rules_footer_button.pressed.connect(_close_rules)
+	_mobile_refresh_rules()
+
+func _mobile_refresh_rules() -> void:
+	if mobile_rules_content == null:
+		return
+	var touch := "Slide the striker on the baseline. Drag back on the pull pad to aim and set power; release to shoot."
+	var sections: Array = []
+	if duboo_mode:
+		mobile_rules_mode.text = "DUBOO  /  SINGLE BOARD"
+		sections = [
+			["OBJECTIVE", "Pocket your nine pieces and secure the red Queen. The CPU plays black."],
+			["TAKING TURNS", "Pocket your colour to play again. Otherwise the CPU takes over."],
+			["THE QUEEN", "Pocket one of yours first. Cover the Queen on the same shot or your next shot, or it returns."],
+			["THE RING", "The large ring cannot enter a pocket, so ring-pocket fouls do not occur. Physics are approximate."],
+			["WINNING", "Complete one board to win. Select NEW BOARD for another match."],
+			["TOUCH CONTROLS", touch]
+		]
+	else:
+		mobile_rules_mode.text = "CLASSIC  /  SINGLE BOARD"
+		sections = [
+			["OBJECTIVE", "Pocket all nine white pieces and secure the Queen. The CPU plays black."],
+			["TAKING TURNS", "White breaks. Pocket your colour to play again; otherwise turns switch."],
+			["THE QUEEN", "Pocket one of yours first. Cover the Queen now or on your next shot, or it returns. Your first piece alone cannot cover it."],
+			["STRIKER FOUL", "Pocketing the striker ends your turn and returns one piece, or creates a debt."],
+			["SCORING", "Earn 1 point per opponent piece left. The Queen adds 3, or 1 at 22+ match points. One-board match."],
+			["TOUCH CONTROLS", touch]
+		]
+	var compact := portrait_touch and (size.x < 355.0 or size.y < 620.0)
+	if compact:
+		if duboo_mode:
+			sections = [
+				["OBJECTIVE & TURNS", "Pocket nine of your colour and secure the Queen. Pocket yours to play again."],
+				["THE QUEEN", "Take one of yours first. Cover the Queen on the same or next shot, or it returns."],
+				["RING & WIN", "The ring cannot be pocketed. Win one board; NEW BOARD starts another."],
+				["TOUCH CONTROLS", touch]
+			]
+		else:
+			sections = [
+				["OBJECTIVE & TURNS", "Pocket nine white pieces. White breaks; pocket yours to play again."],
+				["THE QUEEN", "Take one of yours first. Cover the Queen now or next shot, or it returns. Your first piece needs a later cover."],
+				["FOUL & SCORE", "Striker pocket ends your turn and costs a piece. Score pieces left; Queen adds 3 (1 at 22+)."],
+				["TOUCH CONTROLS", touch]
+			]
+	for i in range(mobile_rules_cards.size()):
+		mobile_rules_cards[i].visible = i < sections.size()
+		if i < sections.size():
+			mobile_rules_titles[i].text = str(sections[i][0])
+			mobile_rules_descriptions[i].text = str(sections[i][1])
 
 func _close_rules() -> void:
 	if rules_overlay == null or not rules_overlay.visible:
@@ -1387,8 +1488,7 @@ func _refresh_mode_ui() -> void:
 			rules_body.text = "DUBOO - KARACHI-INSPIRED\nPlay a single board on a large slate/marble-style table with smaller counters, compact markings, and an oversize open-centred acrylic ring. The ring is much larger than the pocket and cannot fall into it. The physics are gameplay approximations.\n\nPLAY\nClick the bottom baseline to position the ring. Aim, hold left mouse to charge, then release. The controls are identical to Classic.\n\nOBJECTIVE\nPocket all nine of your colour and legally secure the Queen. Pocket your colour to shoot again. CPU plays black.\n\nQUEEN AND FOULS\nQueen and cover rules follow this game's existing adaptation. A ring-pocket foul is impossible because the ring cannot fit a hole.\n\nMATCH\nA single completed board determines the winner. Select NEW BOARD to restart."
 		else:
 			rules_body.text = "OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nYou keep shooting whenever you pocket your color; otherwise the turn passes.\n\nTHE QUEEN\nYou must first pocket a piece of your color. Pocket the Queen and another piece in the same shot or cover it on your next shot. If not covered, she returns to the center.\n\nSTRIKER FOUL\nPocketing the striker costs one of your pocketed pieces, or creates an owed piece, and ends the turn.\n\nSCORING\nFirst to 25 points or the leader after eight boards wins. Uncommon compound fouls are simplified."
-	if portrait_touch:
-		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nDrag the striker along the lower baseline to place it. Touch PULL BACK below the board. Drag backward to set shot angle and strength: down means shoot up, and sideways changes the angle. Release to fire. A very short pull cancels the shot. No timer and no need to hold."
+	_mobile_refresh_rules()
 	_refresh_board_style_ui()
 	_refresh_rival_card()
 	_mobile_sync()
@@ -1411,6 +1511,10 @@ func _layout() -> void:
 		mobile_board_finger = -1
 		mobile_board_mouse_down = false
 		portrait_touch = should_portrait
+	if desktop_rules_scroll != null:
+		desktop_rules_scroll.visible = not portrait_touch
+		mobile_rules_content.visible = portrait_touch
+		rules_footer_button.visible = not portrait_touch
 	if portrait_touch:
 		_layout_portrait(sz)
 		return
@@ -1508,8 +1612,8 @@ func _layout_portrait(sz: Vector2) -> void:
 	mode_bar.add_theme_constant_override("separation", maxi(8, int(round(9.0 * u))))
 	classic_button.custom_minimum_size.y = mode_h
 	duboo_button.custom_minimum_size.y = mode_h
-	classic_button.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
-	duboo_button.add_theme_font_size_override("font_size", maxi(16, int(round(19.0 * u))))
+	classic_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
+	duboo_button.add_theme_font_size_override("font_size", maxi(17, int(round(19.0 * u))))
 	_mobile_button_skin(classic_button, not duboo_mode, u)
 	_mobile_button_skin(duboo_button, duboo_mode, u)
 	y += mode_h + rhythm
@@ -1526,8 +1630,8 @@ func _layout_portrait(sz: Vector2) -> void:
 	# Game status belongs ABOVE the table, not among the bottom controls.
 	mobile_status_panel.position = Vector2(gutter, y)
 	mobile_status_panel.size = Vector2(sz.x - gutter * 2.0, status_h)
-	mobile_status_title.add_theme_font_size_override("font_size", maxi(15, int(round(18.0 * u))))
-	mobile_status_hint.add_theme_font_size_override("font_size", maxi(11, int(round(13.8 * u))))
+	mobile_status_title.add_theme_font_size_override("font_size", maxi(16, int(round(17.5 * u))))
+	mobile_status_hint.add_theme_font_size_override("font_size", maxi(14, int(round(13.8 * u))))
 	y += status_h + 7.0 * u
 
 	var scale_value := board_width / 766.0
@@ -1557,83 +1661,146 @@ func _layout_portrait(sz: Vector2) -> void:
 	mobile_fire.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
 	_mobile_fire_visual(phase == "charging")
 
-	# Modal occupies the upper screen with its own internally scrolling body.
+	# Responsive portrait dialogs use the SAME pixel density as the game HUD.
+	# They occupy separate, centered sheets with a content-specific height.
+	# In particular, do NOT cap the text at 1.22 when the UI is at 2.4x.
 	mobile_menu_scrim.position = Vector2.ZERO
 	mobile_menu_scrim.size = sz
-	var menu_w := sz.x - 2.0 * gutter
-	var menu_h := minf(398.0 * u, sz.y - safe_top - safe_bottom - 12.0 * u)
-	mobile_menu_panel.position = Vector2(gutter, safe_top + header_h + 12.0 * u)
-	mobile_menu_panel.size = Vector2(menu_w, minf(menu_h, sz.y - mobile_menu_panel.position.y - safe_bottom))
-	var menu_skin := mobile_menu_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
-	menu_skin.content_margin_left = 17.0 * u
-	menu_skin.content_margin_right = 17.0 * u
-	menu_skin.content_margin_top = 17.0 * u
-	menu_skin.content_margin_bottom = 17.0 * u
-	mobile_menu_panel.add_theme_stylebox_override("panel", menu_skin)
-	_mobile_menu_layout(u)
+	var modal_u := clampf(minf(sz.x / 430.0, sz.y / 760.0), 0.72, 2.5)
+	mobile_modal_scale = modal_u
+	var modal_gutter := maxf(9.0, 12.0 * modal_u)
+	var modal_top := maxf(8.0, 12.0 * modal_u)
+	var modal_bottom := maxf(8.0, 12.0 * modal_u)
+	var available_h := maxf(0.0, sz.y - modal_top - modal_bottom)
+	var modal_w := maxf(0.0, sz.x - 2.0 * modal_gutter)
 
-	var dialog_size := Vector2(sz.x - gutter * 2.0, minf(sz.y - safe_top - safe_bottom, 740.0 * u))
-	rules_overlay.position = Vector2((sz.x - dialog_size.x) * 0.5, safe_top)
-	rules_overlay.size = dialog_size
-	rules_body.add_theme_font_size_override("font_size", maxi(16, int(round(17.0 * u))))
-	rules_close_button.custom_minimum_size = Vector2(94.0 * u, 48.0 * u)
-	rules_close_button.add_theme_font_size_override("font_size", maxi(15, int(round(17.0 * u))))
-	rules_footer_button.custom_minimum_size.y = 52.0 * u
-	rules_footer_button.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
-	_mobile_button_skin(rules_close_button, true, u)
-	_mobile_button_skin(rules_footer_button, true, u)
-	if rules_body != null and not rules_body.text.contains("PORTRAIT TOUCH CONTROLS"):
-		rules_body.text += "\n\nPORTRAIT TOUCH CONTROLS\nMove the striker by dragging on the lower baseline. Then touch PULL BACK below the board, drag backward to set both direction and power, and lift your finger to shoot. A short drag cancels. There is no timed charging or automatic firing."
+	# A deliberately COMPACT settings sheet. No filler gaps, no scrollbar,
+	# and no drifting controls even on very tall phones.
+	var menu_h := minf(available_h, 505.0 * modal_u)
+	mobile_menu_panel.position = Vector2(modal_gutter, modal_top + (available_h - menu_h) * 0.5)
+	mobile_menu_panel.size = Vector2(modal_w, menu_h)
+	var menu_skin := mobile_menu_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	menu_skin.content_margin_left = 15.0 * modal_u
+	menu_skin.content_margin_right = 15.0 * modal_u
+	menu_skin.content_margin_top = 14.0 * modal_u
+	menu_skin.content_margin_bottom = 14.0 * modal_u
+	mobile_menu_panel.add_theme_stylebox_override("panel", menu_skin)
+	_mobile_menu_layout(modal_u)
+
+	# Rules get their OWN taller canvas and larger paragraph type. It contains
+	# six cards without a ScrollContainer; desktop keeps its full rules page.
+	var rules_h := minf(available_h, 708.0 * modal_u)
+	rules_overlay.position = Vector2(modal_gutter, modal_top + (available_h - rules_h) * 0.5)
+	rules_overlay.size = Vector2(modal_w, rules_h)
+	var rules_skin := rules_overlay.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	rules_skin.content_margin_left = 12.0 * modal_u
+	rules_skin.content_margin_right = 12.0 * modal_u
+	rules_skin.content_margin_top = 12.0 * modal_u
+	rules_skin.content_margin_bottom = 12.0 * modal_u
+	rules_overlay.add_theme_stylebox_override("panel", rules_skin)
+	_mobile_rules_layout(modal_u)
 	_mobile_sync()
 
 func _mobile_menu_layout(u: float) -> void:
-	# Independently scaled typography and tap targets; avoids narrow popups.
-	var scroll := mobile_menu_panel.get_child(0) as ScrollContainer
-	var content := scroll.get_child(0) as VBoxContainer
-	content.add_theme_constant_override("separation", maxi(8, int(round(11.0 * u))))
-	for node in content.get_children():
-		if node is Label:
-			var label := node as Label
-			label.add_theme_font_size_override("font_size", maxi(12, int(round(12.0 * u))))
+	# Important: no scrolling and no expand-fill spacer. Use a clear vertical
+	# hierarchy of one title, three setting groups and two large actions.
+	var content := mobile_menu_content
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_theme_constant_override("separation", maxi(5, int(round(7.0 * u))))
 	var header := content.get_child(0) as HBoxContainer
 	var heading_stack := header.get_child(0) as VBoxContainer
+	heading_stack.add_theme_constant_override("separation", maxi(1, int(round(2.0 * u))))
 	var header_title := heading_stack.get_child(0) as Label
 	var header_subtitle := heading_stack.get_child(1) as Label
-	header_title.add_theme_font_size_override("font_size", maxi(21, int(round(23.0 * u))))
-	header_subtitle.add_theme_font_size_override("font_size", maxi(11, int(round(12.0 * u))))
+	header_title.add_theme_font_size_override("font_size", maxi(23, int(round(23.0 * u))))
+	header_subtitle.add_theme_font_size_override("font_size", maxi(13, int(round(11.5 * u))))
 	var close := header.get_child(1) as Button
-	close.custom_minimum_size = Vector2(81.0 * u, 42.0 * u)
-	close.add_theme_font_size_override("font_size", maxi(13, int(round(14.0 * u))))
+	close.custom_minimum_size = Vector2(71.0 * u, maxf(42.0, 42.0 * u))
+	close.add_theme_font_size_override("font_size", maxi(14, int(round(13.0 * u))))
 	_mobile_button_skin(close, false, u)
-	var design_panel := content.get_child(3) as PanelContainer
-	var row := design_panel.get_child(0) as HBoxContainer
+
+	for name in ["MenuDesignTitle", "MenuDifficultyTitle"]:
+		var heading := content.get_node(name) as Label
+		heading.add_theme_font_size_override("font_size", maxi(15, int(round(13.0 * u))))
+	for item in content.get_children():
+		if item is Label and item.name != "MenuFootnote" and item.name != "MenuDesignTitle" and item.name != "MenuDifficultyTitle":
+			(item as Label).add_theme_font_size_override("font_size", maxi(15, int(round(13.0 * u))))
+
+	var design_panel := content.get_node("MenuDesignPanel") as PanelContainer
+	var panel_skin := design_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	panel_skin.content_margin_top = 6.0 * u
+	panel_skin.content_margin_bottom = 6.0 * u
+	panel_skin.content_margin_left = 6.0 * u
+	panel_skin.content_margin_right = 6.0 * u
+	design_panel.add_theme_stylebox_override("panel", panel_skin)
+	var design_row := design_panel.get_child(0) as HBoxContainer
+	design_row.add_theme_constant_override("separation", maxi(4, int(round(6.0 * u))))
 	for b in [mobile_menu_prev, mobile_menu_next_style]:
-		b.custom_minimum_size = Vector2(64.0 * u, 50.0 * u)
-		b.add_theme_font_size_override("font_size", maxi(12, int(round(13.5 * u))))
+		b.custom_minimum_size = Vector2(54.0 * u, maxf(43.0, 43.0 * u))
+		b.add_theme_font_size_override("font_size", maxi(14, int(round(13.0 * u))))
 		_mobile_button_skin(b, false, u)
-	mobile_menu_style_count.add_theme_font_size_override("font_size", maxi(12, int(round(13.0 * u))))
-	mobile_menu_style_name.add_theme_font_size_override("font_size", maxi(12, int(round(15.0 * u))))
-	row.add_theme_constant_override("separation", maxi(4, int(round(6.0 * u))))
+	mobile_menu_style_count.add_theme_font_size_override("font_size", maxi(13, int(round(12.5 * u))))
+	mobile_menu_style_name.add_theme_font_size_override("font_size", maxi(15, int(round(15.0 * u))))
+
 	var difficulty_row := content.get_node("MenuDifficultyChoices") as HBoxContainer
-	difficulty_row.add_theme_constant_override("separation", maxi(5, int(round(7.0 * u))))
+	difficulty_row.add_theme_constant_override("separation", maxi(4, int(round(6.0 * u))))
 	for b in mobile_menu_difficulties:
-		b.custom_minimum_size.y = 48.0 * u
-		b.add_theme_font_size_override("font_size", maxi(12, int(round(13.5 * u))))
+		b.custom_minimum_size.y = maxf(46.0, 45.0 * u)
+		b.add_theme_font_size_override("font_size", maxi(13, int(round(13.0 * u))))
+
+	var rival_row := content.get_node("MenuRivalChoices") as HBoxContainer
+	rival_row.add_theme_constant_override("separation", maxi(5, int(round(7.0 * u))))
 	for b in [mobile_rival_prev, mobile_rival_next]:
-		b.custom_minimum_size = Vector2(62.0 * u, 44.0 * u)
-		b.add_theme_font_size_override("font_size", maxi(12, int(round(13.0 * u))))
+		b.custom_minimum_size = Vector2(54.0 * u, maxf(44.0, 44.0 * u))
+		b.add_theme_font_size_override("font_size", maxi(14, int(round(13.0 * u))))
 		_mobile_button_skin(b, false, u)
-	mobile_rival_name.add_theme_font_size_override("font_size", maxi(12, int(round(14.0 * u))))
-	mobile_rival_bio.add_theme_font_size_override("font_size", maxi(11, int(round(12.0 * u))))
+	mobile_rival_name.add_theme_font_size_override("font_size", maxi(15, int(round(14.0 * u))))
+	mobile_rival_bio.add_theme_font_size_override("font_size", maxi(14, int(round(12.5 * u))))
+	# A short two-line description is part of the settings composition, not
+	# an expanding text area that shoves actions out of view.
+	mobile_rival_bio.max_lines_visible = 2
+
 	var actions := content.get_node("MenuActions") as HBoxContainer
 	actions.add_theme_constant_override("separation", maxi(7, int(round(9.0 * u))))
 	for b in [mobile_menu_rules, mobile_menu_restart, mobile_menu_next_board]:
-		b.custom_minimum_size.y = 49.0 * u
-		b.add_theme_font_size_override("font_size", maxi(13, int(round(15.0 * u))))
+		b.custom_minimum_size.y = maxf(47.0, 47.0 * u)
+		b.add_theme_font_size_override("font_size", maxi(16, int(round(15.0 * u))))
 		_mobile_button_skin(b, b == mobile_menu_next_board, u)
 	var footer := content.get_node("MenuFootnote") as Label
-	footer.add_theme_font_size_override("font_size", maxi(10, int(round(11.0 * u))))
+	footer.add_theme_font_size_override("font_size", maxi(12, int(round(11.0 * u))))
 	_mobile_refresh_menu()
+
+func _mobile_rules_layout(u: float) -> void:
+	if mobile_rules_content == null:
+		return
+	_mobile_refresh_rules()
+	var column := rules_overlay.get_child(0) as VBoxContainer
+	column.add_theme_constant_override("separation", maxi(4, int(round(8.0 * u))))
+	var header := column.get_child(0) as HBoxContainer
+	header.add_theme_constant_override("separation", maxi(5, int(round(8.0 * u))))
+	rules_title_label.add_theme_font_size_override("font_size", maxi(20, int(round(22.0 * u))))
+	rules_close_button.custom_minimum_size = Vector2(68.0 * u, maxf(43.0, 43.0 * u))
+	rules_close_button.add_theme_font_size_override("font_size", maxi(14, int(round(13.0 * u))))
+	_mobile_button_skin(rules_close_button, true, u)
+	mobile_rules_content.add_theme_constant_override("separation", maxi(4, int(round(7.0 * u))))
+	mobile_rules_mode.add_theme_font_size_override("font_size", maxi(14, int(round(13.0 * u))))
+	for i in range(mobile_rules_cards.size()):
+		var card := mobile_rules_cards[i]
+		var skin := card.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+		skin.content_margin_left = 10.0 * u
+		skin.content_margin_right = 10.0 * u
+		skin.content_margin_top = 7.0 * u
+		skin.content_margin_bottom = 7.0 * u
+		card.add_theme_stylebox_override("panel", skin)
+		var row := card.get_child(0) as HBoxContainer
+		row.add_theme_constant_override("separation", maxi(5, int(round(9.0 * u))))
+		var number := row.get_child(0) as Label
+		number.custom_minimum_size.x = 24.0 * u
+		number.add_theme_font_size_override("font_size", maxi(14, int(round(13.0 * u))))
+		var copy := row.get_child(1) as VBoxContainer
+		copy.add_theme_constant_override("separation", maxi(1, int(round(2.0 * u))))
+		mobile_rules_titles[i].add_theme_font_size_override("font_size", maxi(15, int(round(14.0 * u))))
+		mobile_rules_descriptions[i].add_theme_font_size_override("font_size", maxi(15, int(round(14.0 * u))))
 
 func _load_board_style() -> void:
 	rival_index = randi_range(0, RIVALS.size() - 1)
@@ -2359,6 +2526,7 @@ func _next_board() -> void:
 func _open_rules() -> void:
 	_mobile_close_menu()
 	_cancel_mobile_charge()
+	_mobile_refresh_rules()
 	rules_overlay.show()
 	rules_overlay.move_to_front()
 	_mobile_sync()
