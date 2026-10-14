@@ -83,16 +83,36 @@ var show_cpu_target := false
 var duboo_mode := false
 
 func _ready() -> void:
+	_static_art = Node2D.new()
+	_static_art.set_script(load("res://scripts/carrom_board_static.gd"))
+	_static_art.z_index = 0
+	_static_art.show_behind_parent = true
+	add_child(_static_art)
+	_sync_static_art()
 	queue_redraw()
 
+# Static artwork lives in a separate CanvasItem and is rebuilt only on style changes.
+var _static_art: Node2D
+var _static_style := -1
+var _static_duboo_style := -1
+var _static_mode := false
+
+func _sync_static_art() -> void:
+	if not is_instance_valid(_static_art):
+		return
+	if _static_style == style_index and _static_duboo_style == duboo_style_index and _static_mode == duboo_mode:
+		return
+	_static_style = style_index
+	_static_duboo_style = duboo_style_index
+	_static_mode = duboo_mode
+	_static_art.style_index = style_index
+	_static_art.duboo_style_index = duboo_style_index
+	_static_art.duboo_mode = duboo_mode
+	_static_art.queue_redraw()
+
 func _draw() -> void:
-	if duboo_mode:
-		_draw_duboo_board()
-	elif style_index == 0:
-		_draw_classic_board()
-	else:
-		_draw_alternate_board()
-	# Subtle highlight of active player's placement zone.
+	_sync_static_art()
+	# Active placement guide remains dynamic, so the static board never redraws on shots.
 	if display_striker:
 		var baseline_y := base_y(side, duboo_mode)
 		var ac: Color = GLOW if side == 0 else Color("#e3b87d")
