@@ -1,0 +1,343 @@
+6:const PHYSICS := preload("res://scripts/carrom_physics.gd")
+7:const BOARD_SCENE := preload("res://scripts/carrom_board.gd")
+8:const BG := Color("#102320")
+9:const PANEL := Color("#19322e")
+10:const PANEL_ALT := Color("#213c36")
+11:const TEXT := Color("#f7f0d9")
+12:const MUTED := Color("#a7bbb1")
+13:const MINT := Color("#7bdac2")
+14:const GOLD := Color("#e8bf7e")
+15:const INK := Color("#0b211e")
+17:const EDGE := Color("#55786b")
+18:const EDGE_SOFT := Color("#3b6055")
+19:const PANEL_LIFT := Color("#24443c")
+20:const MOBILE_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_mobile.png")
+21:const DESKTOP_DIFFICULTY_ARROW := preload("res://assets/difficulty_arrow_desktop.png")
+22:const MOBILE_MENU_BUTTON := preload("res://scripts/mobile_menu_icon.gd")
+23:const MAX_BOARD_COUNT := 1
+24:const MATCH_TARGET := 25
+25:const MIN_SHOT_SPEED := 320.0
+26:const MAX_SHOT_SPEED := 1425.0
+27:const DUBOO_MIN_SHOT_SPEED := 250.0
+28:const DUBOO_MAX_SHOT_SPEED := 1080.0
+30:const DESKTOP_STATS_WIDTH := 244.0
+33:const RIVAL_DRAWER_HANDLE_HEIGHT := 42.0
+38:const RIVALS := [
+66:const RIVAL_POCKET_QUOTES := [
+76:const RIVAL_QUOTE_PEEK_HEIGHT := 167.0
+77:const RIVAL_QUOTE_DISPLAY_TIME := 4.6
+79:const RIVAL_PORTRAITS := [
+90:var duboo_mode := false
+91:var mode_bar: HBoxContainer
+92:var classic_button: Button
+93:var duboo_button: Button
+94:var desktop_classic_button: Button
+95:var desktop_duboo_button: Button
+96:var style_heading: Label
+97:var style_selector: HBoxContainer
+98:var rules_body: Label
+99:var desktop_rules_scroll: ScrollContainer
+100:var mobile_rules_content: VBoxContainer
+101:var mobile_rules_mode: Label
+102:var mobile_rules_titles: Array[Label] = []
+103:var mobile_rules_descriptions: Array[Label] = []
+104:var mobile_rules_cards: Array[PanelContainer] = []
+105:var rules_title_label: Label
+106:var board: CarromBoard
+107:var discs: Array = []
+108:var auto_battle := false
+109:var auto_battle_button: Button
+110:var auto_advance_time := -1.0
+111:var player_turn := 0
+112:var phase := "placement"
+113:var board_number := 1
+114:var totals: Array[int] = [0, 0]
+115:var outstanding_dues: Array[int] = [0, 0]
+116:var queen_owner := -1
+117:var pending_queen := -1
+118:var last_shot_pockets: Array[int] = []
+119:var own_count_before := 0
+120:var shot_duration := 0.0
+121:var charge_time := 0.0
+122:var charge_power := 0.25
+123:var aim_direction := Vector2.UP
+126:const IMPACT_PREVIEW_INTERVAL := 0.075
+127:var impact_preview_age := 1.0
+128:var impact_preview_last_direction := Vector2.ZERO
+129:var impact_preview_last_position := Vector2(-9999.0, -9999.0)
+130:var impact_preview_last_power := -1.0
+131:var cpu_time := 0.0
+132:var cpu_queued_shot: Dictionary = {}
+133:var cpu_skill := 1
+134:var rival_index := 0  # Selected opponent in normal play, BLACK in auto battle.
+135:var auto_rival_index := 0  # Different rival controlling WHITE in spectator mode.
+136:var white_score_heading: Label
+137:var black_score_heading: Label
+138:var rival_card_heading: Label
+139:var auto_rival_card: PanelContainer
+140:var auto_rival_portrait: TextureRect
+141:var auto_rival_name: Label
+142:var auto_rival_bio: Label
+143:var rival_results: Dictionary = {}  # classic_0 -> [player wins, CPU wins, draws]
+144:var rival_match_recorded := false
+145:var rival_portrait: TextureRect
+146:var rival_name: Label
+147:var rival_alias: Label
+148:var rival_type: Label
+149:var rival_bio: Label
+150:var rival_record: Label
+151:var rival_prev_button: Button
+152:var rival_next_button: Button
+153:var rival_drawer: Panel
+154:var rival_drawer_handle: Button
+155:var rival_drawer_scroll: ScrollContainer
+156:var rival_drawer_chevron: Line2D
+157:var rival_drawer_open := false
+158:var rival_drawer_tween: Tween
+159:var rival_quote_box: PanelContainer
+160:var rival_quote_heading: Label
+161:var rival_quote_text: Label
+162:var rival_quote_peek := false
+163:var rival_quote_time := 0.0
+164:var rival_last_quote: Dictionary = {}
+165:var mobile_rival_name: Label
+166:var mobile_rival_bio: Label
+167:var mobile_rival_prev: Button
+168:var mobile_rival_next: Button
+170:var cpu_plan_candidates: Array[Dictionary] = []
+171:var cpu_plan_ranked: Array[Dictionary] = []
+172:var cpu_plan_cursor := 0
+173:var cpu_plan_active := false
+174:var cpu_plan_base_value := 0.0
+175:var winner := -1
+176:var board_finished_message := ""
+177:var status_title := "YOUR BREAK"
+178:var status_text := "Move over the bottom baseline and click to place your striker."
+179:var side_panel: Panel
+180:var stats_panel: Panel
+181:var main_score_white: Label
+182:var main_score_black: Label
+183:var coins_white: Label
+184:var coins_black: Label
+185:var turn_head: Label
+186:var turn_desc: Label
+187:var queen_text: Label
+188:var power_label: Label
+189:var power_meter: ProgressBar
+190:var match_info: Label
+191:var rules_overlay: PanelContainer
+192:var rules_close_button: Button
+193:var rules_footer_button: Button
+194:var next_button: Button
+195:var restart_button: Button
+196:var cpu_selector: OptionButton
+197:var sound_shoot: AudioStreamPlayer
+198:var sound_pocket: AudioStreamPlayer
+199:var sound_pocket_alt: AudioStreamPlayer
+200:var sound_click: AudioStreamPlayer
+201:var sound_impact: AudioStreamPlayer
+202:var sound_rail: AudioStreamPlayer
+203:var impact_cooldown := 0.0
+204:var rail_cooldown := 0.0
+205:var title_label: Label
+206:var board_caption: Label
+207:var board_style_index: int = 0
+208:var duboo_style_index: int = 0
+209:var board_style_label: Label
+210:var board_style_prev: Button
+211:var board_style_next: Button
+212:const SETTINGS_PATH := "user://carrom_board_settings.cfg"
+213:const MATCH_PATH := "user://carrom_match_v1.cfg"
+214:var match_persistence_ready := false
+215:var sound_enabled := true
+216:var desktop_sound_button: Button
+217:var mobile_sound_button: Button
+218:var mobile_auto_battle_button: Button
+219:var tutorial_completed := false
+220:var tutorial_step := 0
+221:var tutorial_overlay: ColorRect
+222:var tutorial_panel: PanelContainer
+223:var tutorial_title: Label
+224:var tutorial_body: Label
+225:var tutorial_next: Button
+226:var tip_label: Label
+229:var portrait_touch := false
+230:var mobile_score_panel: PanelContainer
+231:var mobile_match_label: Label
+232:var mobile_score_headings: Array[Label] = []
+233:var mobile_score_cards: Array[PanelContainer] = []
+234:var mobile_header_subtitle: Label
+235:var mobile_turn_accent: ColorRect
+236:var mobile_you: Label
+237:var mobile_cpu: Label
+238:var mobile_queen: Label
+239:var mobile_status_panel: PanelContainer
+240:var mobile_status_title: Label
+241:var mobile_status_hint: Label
+242:var mobile_power_panel: PanelContainer
+243:var mobile_power_label: Label
+244:var mobile_power_meter: ProgressBar
+245:var mobile_fire: Button
+247:var mobile_menu_button: Button
+248:var mobile_menu_scrim: ColorRect
+249:var mobile_menu_panel: PanelContainer
+250:var mobile_menu_content: VBoxContainer
+251:var mobile_modal_scale := 1.0
+254:var mobile_reflow_pending := false
+255:var mobile_menu_open := false
+256:var mobile_menu_style_name: Label
+257:var mobile_menu_style_count: Label
+258:var mobile_menu_prev: Button
+259:var mobile_menu_next_style: Button
+260:var mobile_menu_difficulties: Array[Button] = []
+261:var mobile_menu_rules: Button
+262:var mobile_menu_restart: Button
+263:var mobile_menu_next_board: Button
+264:var mobile_mobile_scale := 1.0
+265:var mobile_board_finger := -1
+266:var mobile_board_mouse_down := false
+267:var mobile_drag_baseline := false
+268:var mobile_aim_target := Vector2(340.0, 340.0)
+272:var mobile_pull_handle: PanelContainer
+273:var mobile_pull_finger := -1
+274:var mobile_pull_mouse := false
+275:var mobile_pull_origin := Vector2.ZERO
+276:var mobile_pull_length := 0.0
+277:var mobile_pull_idle := 0.0
+278:var mobile_locked_shot_direction := Vector2.UP
+279:var mobile_ignore_synthetic_mouse := 0.0
+280:const MOBILE_PULL_THRESHOLD := 8.0
+281:const MOBILE_PULL_MAX := 190.0
+283:func _ready() -> void:
+308:func _notification(what: int) -> void:
+316:func _schedule_mobile_reflow() -> void:
+322:func _finish_mobile_reflow() -> void:
+335:func _draw() -> void:
+345:func _save_match_snapshot() -> void:
+373:func _restore_match_snapshot() -> bool:
+436:func _build_tutorial() -> void:
+462:func _layout_tutorial() -> void:
+472:func _maybe_show_tutorial() -> void:
+481:func _update_tutorial() -> void:
+494:func _advance_tutorial() -> void:
+501:func _finish_tutorial() -> void:
+506:func _build_audio() -> void:
+525:func _refresh_mode_audio() -> void:
+546:func _play_impact_sfx(feedback: Array, delta: float) -> void:
+573:func _style(bg: Color, border: Color = Color.TRANSPARENT, radius: int = 12) -> StyleBoxFlat:
+585:func _label(parent: Node, value: String, font_size: int, color: Color, wrap_text: bool = false) -> Label:
+595:func _gap(parent: Node, pixels: float) -> void:
+601:func _apply_button_skin(b: Button, highlight: bool = false) -> void:
+629:func _mobile_button_skin(b: Button, highlight: bool, u: float) -> void:
+641:func _make_button(parent: Node, title: String, highlight: bool = false) -> Button:
+653:func _style_cpu_option(opt: OptionButton, portrait: bool, u: float = 1.0, popup_width: int = 0) -> void:
+693:func _sidebar_panel() -> VBoxContainer:
+730:func _sidebar_rule(parent: Node) -> void:
+735:func _stat_row(parent: Node, heading: String, accent: Color) -> Array[Label]:
+756:func _build_ui() -> void:
+897:func _build_rival_drawer() -> void:
+971:func _refresh_rival_drawer_handle() -> void:
+981:func _rival_drawer_target_y() -> float:
+989:func _animate_rival_drawer() -> void:
+999:func _show_rival_pocket_quote(actor: int) -> void:
+1018:func _layout_rival_drawer() -> void:
+1034:func _toggle_rival_drawer() -> void:
+1047:func _build_auto_rival_card(parent: VBoxContainer) -> void:
+1071:func _build_rival_card(parent: VBoxContainer) -> void:
+1153:func _rival_for_player(side: int) -> int:
+1158:func _rival_alias_for_player(side: int) -> String:
+1161:func _choose_auto_rival() -> void:
+1168:func _rival_key() -> String:
+1171:func _refresh_rival_card() -> void:
+1197:func _set_rival(next_index: int) -> void:
+1217:func _record_rival_match(result: int) -> void:
+1236:func _mobile_label(parent: Node, value: String, font_size: int, color: Color) -> Label:
+1243:func _mobile_panel() -> PanelContainer:
+1255:func _mobile_score_tile(parent: HBoxContainer, accent: Color) -> VBoxContainer:
+1275:func _mobile_game_tab_skin(b: Button, selected: bool, u: float) -> void:
+1295:func _build_mobile_ui() -> void:
+1552:func _mobile_menu_outside_input(event: InputEvent) -> void:
+1557:func _mobile_toggle_menu() -> void:
+1563:func _mobile_open_menu() -> void:
+1582:func _mobile_close_menu() -> void:
+1591:func _mobile_set_difficulty(index: int) -> void:
+1599:func _mobile_refresh_menu() -> void:
+1625:func _mobile_sync() -> void:
+1664:func _mobile_position_pull_grip() -> void:
+1679:func _mobile_fire_visual(held: bool) -> void:
+1698:func _cancel_mobile_charge() -> void:
+1713:func _cream_color() -> Color:
+1716:func _score_card(parent: Node, heading: String, accent: Color) -> Array[Label]:
+1729:func _build_rules_overlay() -> void:
+1809:func _mobile_refresh_rules() -> void:
+1871:func _close_rules() -> void:
+1880:func _set_mode(use_duboo: bool) -> void:
+1893:func _refresh_mode_ui() -> void:
+1920:func _shot_speed_min() -> float:
+1923:func _shot_speed_max() -> float:
+1926:func _layout() -> void:
+1993:func _layout_touch_landscape(sz: Vector2) -> void:
+2089:func _layout_portrait(sz: Vector2) -> void:
+2243:func _mobile_fit_dialogs() -> void:
+2261:func _mobile_fit_panel(panel: PanelContainer, safe: Rect2, ideal_h: float) -> void:
+2278:func _mobile_menu_layout(u: float) -> void:
+2363:func _mobile_rules_layout(u: float) -> void:
+2401:func _load_board_style() -> void:
+2416:func _save_board_style() -> void:
+2425:func _save_user_preferences() -> void:
+2435:func _apply_sound_state() -> void:
+2445:func _toggle_sound() -> void:
+2451:func _refresh_board_style_ui() -> void:
+2464:func _cycle_board_style(step: int) -> void:
+2478:func _toggle_auto_battle() -> void:
+2487:func _auto_begin_turn() -> void:
+2502:func _auto_mirror_state() -> Array:
+2513:func _auto_mirror_owner(owner: int) -> int:
+2516:func _auto_cpu_search_start() -> void:
+2533:func _auto_cpu_search_frame() -> void:
+2550:func _new_match() -> void:
+2571:func _begin_board() -> void:
+2623:func _add_disc(kind: String, at: Vector2, id_number: int) -> void:
+2626:func _get_striker() -> Dictionary:
+2629:func _get_disc(id_number: int) -> Dictionary:
+2635:func _pocketed_count(kind: String) -> int:
+2642:func _kind_for(player: int) -> String:
+2645:func _set_status(title: String, message: String) -> void:
+2654:func _refresh_ui() -> void:
+2682:func _screen_to_board() -> Vector2:
+2685:func _valid_baseline_click(point: Vector2) -> bool:
+2688:func _place_striker(player: int, desired_x: float) -> bool:
+2707:func _can_place_striker(point: Vector2) -> bool:
+2715:func _mobile_board_point(global_point: Vector2) -> Vector2:
+2718:func _mobile_is_baseline(point: Vector2) -> bool:
+2721:func _mobile_is_board(point: Vector2) -> bool:
+2724:func _mobile_start_board_drag(screen_point: Vector2) -> bool:
+2738:func _mobile_update_board_drag(screen_point: Vector2) -> void:
+2770:func _mobile_touch_on_grip(position: Vector2) -> bool:
+2777:func _mobile_start_pull(position: Vector2) -> void:
+2792:func _mobile_update_pull(position: Vector2) -> void:
+2814:func _mobile_end_pull() -> void:
+2828:func _mobile_handle_touch(event: InputEventScreenTouch) -> void:
+2856:func _mobile_handle_mouse(event: InputEvent) -> void:
+2889:func _input(event: InputEvent) -> void:
+2919:func _unhandled_input(event: InputEvent) -> void:
+2959:func _process(delta: float) -> void:
+3024:func _update_impact_preview(delta: float) -> void:
+3041:func _shoot(direction: Vector2, power: float) -> void:
+3071:func _physics_process(delta: float) -> void:
+3095:func _respot_disc(disc: Dictionary) -> void:
+3102:func _respot_queen() -> void:
+3109:func _apply_striker_due(player: int) -> String:
+3118:func _collect_outstanding_due(player: int) -> String:
+3128:func _resolve_shot() -> void:
+3231:func _end_board(board_winner: int, reason: String) -> void:
+3273:func _next_board() -> void:
+3280:func _open_rules() -> void:
+3296:func _cpu_start_search() -> void:
+3442:func _cpu_reserve_candidates(pool: Array[Dictionary], amount: int, per_target: int) -> void:
+3467:func _cpu_add_intention(pool: Array[Dictionary], x: float, direction: Vector2, speed: float, merit: float, target: Vector2, style: String) -> void:
+3470:func _cpu_lane_open(a: Vector2, b: Vector2, width: float, excluded_id: int) -> bool:
+3487:func _cpu_state_lane_open(state: Array, start: Vector2, finish: Vector2, exclude_id: int) -> bool:
+3502:func _cpu_position_value(state: Array) -> float:
+3522:func _cpu_predict(candidate: Dictionary) -> float:
+3587:func _cpu_search_frame() -> void:

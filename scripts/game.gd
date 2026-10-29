@@ -142,6 +142,8 @@ var auto_rival_name: Label
 var auto_rival_bio: Label
 var rival_results: Dictionary = {}  # classic_0 -> [player wins, CPU wins, draws]
 var rival_match_recorded := false
+var result_first_clear := false
+var result_reason := ""
 var rival_portrait: TextureRect
 var rival_name: Label
 var rival_alias: Label
@@ -162,10 +164,34 @@ var rival_quote_text: Label
 var rival_quote_peek := false
 var rival_quote_time := 0.0
 var rival_last_quote: Dictionary = {}
-var mobile_rival_name: Label
-var mobile_rival_bio: Label
-var mobile_rival_prev: Button
-var mobile_rival_next: Button
+# Mobile portrait and opponent information are exclusive to the right-hand drawer.
+var mobile_rival_trigger: Button
+var mobile_rival_drawer_scrim: ColorRect
+var mobile_rival_drawer_panel: PanelContainer
+var mobile_rival_drawer_open := false
+var mobile_rival_drawer_tween: Tween
+var mobile_rival_drawer_portrait: TextureRect
+var mobile_rival_drawer_name: Label
+var mobile_rival_drawer_alias: Label
+var mobile_rival_drawer_type: Label
+var mobile_rival_drawer_bio: Label
+var mobile_rival_drawer_record: Label
+var mobile_rival_drawer_progress: Label
+var mobile_rival_drawer_counter: Label
+var mobile_rival_drawer_prev: Button
+var mobile_rival_drawer_next: Button
+# Keep the profile independently responsive to phone/tablet viewport sizes.
+var mobile_rival_drawer_outer: VBoxContainer
+var mobile_rival_drawer_header_label: Label
+var mobile_rival_drawer_close: Button
+var mobile_rival_drawer_scroll: ScrollContainer
+var mobile_rival_drawer_content: VBoxContainer
+var mobile_rival_drawer_bio_card: PanelContainer
+var mobile_rival_drawer_record_card: PanelContainer
+var mobile_rival_drawer_footer: VBoxContainer
+var mobile_rival_drawer_arrows: HBoxContainer
+var mobile_rival_drawer_footnote: Label
+var mobile_rival_menu_link: Button
 # Per-turn incremental physics search. Each difficulty gets its own budget.
 var cpu_plan_candidates: Array[Dictionary] = []
 var cpu_plan_ranked: Array[Dictionary] = []
@@ -210,11 +236,35 @@ var board_style_label: Label
 var board_style_prev: Button
 var board_style_next: Button
 const SETTINGS_PATH := "user://carrom_board_settings.cfg"
+const MATCH_PATH := "user://carrom_match_v1.cfg"
+var match_persistence_ready := false
+var sound_enabled := true
+var desktop_sound_button: Button
+var mobile_sound_button: Button
+var mobile_auto_battle_button: Button
+var tutorial_completed := false
+var tutorial_step := 0
+var tutorial_overlay: ColorRect
+var tutorial_panel: PanelContainer
+var tutorial_title: Label
+var tutorial_body: Label
+var tutorial_next: Button
 var tip_label: Label
 
 # A separate, portrait-only control surface. Desktop input/layout is unchanged.
 var portrait_touch := false
 var mobile_score_panel: PanelContainer
+# Modal appears only after a completed match. The rival portrait is also visible in the live HUD.
+var result_overlay: ColorRect
+var result_panel: PanelContainer
+var result_portrait: TextureRect
+var result_title: Label
+var result_opponent: Label
+var result_summary: Label
+var result_record: Label
+var result_progress: Label
+var result_rematch: Button
+var result_next_rival: Button
 var mobile_match_label: Label
 var mobile_score_headings: Array[Label] = []
 var mobile_score_cards: Array[PanelContainer] = []
@@ -276,17 +326,26 @@ func _ready() -> void:
 	board.set_duboo_style(duboo_style_index)
 	_build_ui()
 	_build_mobile_ui()
+	_build_tutorial()
+	_build_result_ui()
 	_refresh_mode_ui()
 	_build_audio()
+	_apply_sound_state()
 	_refresh_board_style_ui()
 	_new_match()
 	_layout()
+	match_persistence_ready = true
+	if not _restore_match_snapshot():
+		_save_match_snapshot()
+	_maybe_show_tutorial()
 	get_window().focus_exited.connect(_cancel_mobile_charge)
 	get_viewport().size_changed.connect(_schedule_mobile_reflow)
 	_schedule_mobile_reflow()
 	queue_redraw()
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_match_snapshot()
 	if what == NOTIFICATION_RESIZED and is_node_ready():
 		_layout()
 		_schedule_mobile_reflow()
@@ -320,6 +379,290 @@ func _draw() -> void:
 	for n in range(int(sz.x / 30.0) + 2):
 		var xx: float = float(n) * 30.0
 		draw_line(Vector2(xx, 0), Vector2(xx, sz.y), Color(1, 1, 1, 0.018), 1.0)
+
+func _save_match_snapshot() -> void:
+	# Save at stable turn boundaries, never a partially integrated shot.
+	if not match_persistence_ready or board == null:
+		return
+	if phase in ["moving", "charging", "cpu_search", "cpu_aim"]:
+		return
+	if discs.size() != 20:
+		return
+	var config := ConfigFile.new()
+	config.set_value("match", "version", 1)
+	config.set_value("match", "discs", discs.duplicate(true))
+	config.set_value("match", "mode", duboo_mode)
+	config.set_value("match", "auto_battle", auto_battle)
+	config.set_value("match", "auto_rival", auto_rival_index)
+	config.set_value("match", "rival", rival_index)
+	config.set_value("match", "turn", player_turn)
+	config.set_value("match", "phase", phase)
+	config.set_value("match", "board_number", board_number)
+	config.set_value("match", "totals", totals.duplicate())
+	config.set_value("match", "dues", outstanding_dues.duplicate())
+	config.set_value("match", "queen_owner", queen_owner)
+	config.set_value("match", "pending_queen", pending_queen)
+	config.set_value("match", "winner", winner)
+	config.set_value("match", "recorded", rival_match_recorded)
+	config.set_value("match", "first_clear", result_first_clear)
+	config.set_value("match", "result_reason", result_reason)
+	config.set_value("match", "title", status_title)
+	config.set_value("match", "message", status_text)
+	config.save(MATCH_PATH)
+
+func _restore_match_snapshot() -> bool:
+	var config := ConfigFile.new()
+	if not FileAccess.file_exists(MATCH_PATH) or config.load(MATCH_PATH) != OK:
+		return false
+	if int(config.get_value("match", "version", 0)) != 1:
+		return false
+	var saved_discs: Variant = config.get_value("match", "discs", [])
+	if not (saved_discs is Array) or saved_discs.size() != 20:
+		return false
+	for disc in saved_discs:
+		if not (disc is Dictionary) or not disc.has("id") or not disc.has("pos") or not disc.has("vel") or not disc.has("kind") or not disc.has("pocketed"):
+			return false
+		if not (disc["pos"] is Vector2) or not (disc["vel"] is Vector2):
+			return false
+	var saved_totals: Variant = config.get_value("match", "totals", [0, 0])
+	var saved_dues: Variant = config.get_value("match", "dues", [0, 0])
+	if not (saved_totals is Array) or saved_totals.size() != 2 or not (saved_dues is Array) or saved_dues.size() != 2:
+		return false
+	duboo_mode = bool(config.get_value("match", "mode", false))
+	auto_battle = bool(config.get_value("match", "auto_battle", false))
+	auto_rival_index = clampi(int(config.get_value("match", "auto_rival", 0)), 0, RIVALS.size() - 1)
+	rival_index = clampi(int(config.get_value("match", "rival", rival_index)), 0, RIVALS.size() - 1)
+	player_turn = clampi(int(config.get_value("match", "turn", 0)), 0, 1)
+	board_number = clampi(int(config.get_value("match", "board_number", 1)), 1, MAX_BOARD_COUNT)
+	totals = [int(saved_totals[0]), int(saved_totals[1])]
+	outstanding_dues = [int(saved_dues[0]), int(saved_dues[1])]
+	queen_owner = clampi(int(config.get_value("match", "queen_owner", -1)), -1, 1)
+	pending_queen = clampi(int(config.get_value("match", "pending_queen", -1)), -1, 1)
+	winner = clampi(int(config.get_value("match", "winner", -1)), -1, 1)
+	rival_match_recorded = bool(config.get_value("match", "recorded", false))
+	result_first_clear = bool(config.get_value("match", "first_clear", false))
+	result_reason = str(config.get_value("match", "result_reason", ""))
+	discs = saved_discs.duplicate(true)
+	board.discs = discs
+	board.duboo_mode = duboo_mode
+	board.side = player_turn
+	var saved_phase: String = str(config.get_value("match", "phase", "aim"))
+	if saved_phase == "match_over":
+		phase = "match_over"
+	elif saved_phase == "cpu_think" or auto_battle or player_turn == 1:
+		phase = "cpu_think"
+	else:
+		phase = "aim" if portrait_touch else "placement"
+	board.display_striker = phase != "match_over"
+	board.show_aim = phase == "aim" and not auto_battle
+	board.show_cpu_target = false
+	board.impact_preview.clear()
+	board.charging = false
+	cpu_plan_active = false
+	cpu_plan_candidates.clear()
+	cpu_plan_ranked.clear()
+	cpu_time = 0.85
+	var striker: Dictionary = _get_striker()
+	striker["vel"] = Vector2.ZERO
+	mobile_aim_target = (striker["pos"] as Vector2) + Vector2.UP * 220.0
+	aim_direction = Vector2.UP
+	board.aim_direction = aim_direction
+	auto_battle_button.text = "AUTO BATTLE  ON" if auto_battle else "AUTO BATTLE  OFF"
+	_refresh_mode_ui()
+	_refresh_rival_card()
+	_set_status(str(config.get_value("match", "title", "MATCH RESUMED")), str(config.get_value("match", "message", "Continue your match.")))
+	_refresh_ui()
+	_show_match_result()
+	board.queue_redraw()
+	return true
+
+func _build_result_ui() -> void:
+	result_overlay = ColorRect.new()
+	result_overlay.color = Color(0.012, 0.034, 0.029, 0.91)
+	result_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	result_overlay.hide()
+	add_child(result_overlay)
+	result_panel = PanelContainer.new()
+	var skin := _style(PANEL, EDGE, 17)
+	skin.content_margin_left = 22
+	skin.content_margin_right = 22
+	skin.content_margin_top = 18
+	skin.content_margin_bottom = 18
+	result_panel.add_theme_stylebox_override("panel", skin)
+	result_overlay.add_child(result_panel)
+	var content := VBoxContainer.new()
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_theme_constant_override("separation", 9)
+	result_panel.add_child(content)
+	result_title = _label(content, "VICTORY", 27, MINT, true)
+	result_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_opponent = _label(content, "", 16, GOLD, true)
+	result_opponent.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var center := CenterContainer.new()
+	content.add_child(center)
+	result_portrait = TextureRect.new()
+	result_portrait.custom_minimum_size = Vector2(156, 156)
+	result_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	result_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	result_portrait.clip_contents = true
+	center.add_child(result_portrait)
+	result_summary = _label(content, "", 13, TEXT, true)
+	result_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_record = _label(content, "", 13, MINT, true)
+	result_record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_progress = _label(content, "", 13, GOLD, true)
+	result_progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 9)
+	content.add_child(actions)
+	result_rematch = _make_button(actions, "REMATCH", true)
+	result_rematch.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_rematch.custom_minimum_size.y = 49
+	result_rematch.pressed.connect(_result_play_again)
+	result_next_rival = _make_button(actions, "NEXT RIVAL")
+	result_next_rival.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_next_rival.custom_minimum_size.y = 49
+	result_next_rival.pressed.connect(_result_next_opponent)
+	var view_button := _make_button(content, "VIEW FINISHED BOARD")
+	view_button.custom_minimum_size.y = 42
+	view_button.pressed.connect(func() -> void: result_overlay.hide())
+
+func _layout_result_ui() -> void:
+	if result_overlay == null or result_panel == null:
+		return
+	result_overlay.position = Vector2.ZERO
+	result_overlay.size = size
+	var padding := 12.0
+	if size.x <= padding * 2.0 or size.y <= padding * 2.0:
+		return
+	var safe_width := minf(410.0, size.x - padding * 2.0)
+	var safe := Rect2(Vector2((size.x - safe_width) * 0.5, padding), Vector2(safe_width, size.y - padding * 2.0))
+	# Compact on desktop and fully responsive on phones. No scrolling needed.
+	_mobile_fit_panel(result_panel, safe, 470.0)
+
+func _show_match_result() -> void:
+	if result_overlay == null:
+		return
+	if phase != "match_over":
+		result_overlay.hide()
+		return
+	var rival_shown := _rival_for_player(winner) if auto_battle and winner >= 0 else rival_index
+	result_portrait.texture = RIVAL_PORTRAITS[rival_shown]
+	result_opponent.text = "%s  /  %s" % [str(RIVALS[rival_shown]["name"]), str(RIVALS[rival_shown]["alias"])]
+	if auto_battle:
+		result_title.text = "RIVAL VICTORY" if winner >= 0 else "DRAW"
+		result_title.add_theme_color_override("font_color", GOLD)
+		result_summary.text = ("%s won the showdown." % _rival_alias_for_player(winner)) if winner >= 0 else "The rivals finished level."
+		result_record.text = "AUTO BATTLE / SPECTATOR MATCH"
+		result_progress.text = "SPECTATOR MATCHES DO NOT COUNT TOWARD THE CLUB"
+		result_rematch.text = "WATCH AGAIN"
+		result_next_rival.text = "NEW MATCHUP"
+	else:
+		result_title.text = "VICTORY" if winner == 0 else ("DEFEAT" if winner == 1 else "DRAW")
+		result_title.add_theme_color_override("font_color", MINT if winner == 0 else GOLD)
+		result_summary.text = ("YOU DEFEATED %s" % _rival_alias_for_player(1)) if winner == 0 else (("%s WON THIS MATCH" % _rival_alias_for_player(1)) if winner == 1 else "A DRAW AGAINST YOUR RIVAL")
+		var record: Array = rival_results.get(_rival_key(), [0, 0, 0])
+		result_record.text = "YOUR RECORD  %d W  /  %d L  /  %d D" % [int(record[0]), int(record[1]), int(record[2])]
+		var club := _club_cleared_count()
+		result_progress.text = ("%s CLUB COMPLETE!  %d / %d RIVALS" % ["DUBOO" if duboo_mode else "CLASSIC", club, RIVALS.size()]) if club == RIVALS.size() else ("NEW RIVAL DEFEATED!  %d / %d" % [club, RIVALS.size()] if result_first_clear else ("%s CLUB  %d / %d RIVALS DEFEATED" % ["DUBOO" if duboo_mode else "CLASSIC", club, RIVALS.size()]))
+		result_rematch.text = "REMATCH"
+		result_next_rival.text = "NEXT RIVAL"
+	# Show the actual adjudication reason so an unexpected finish is understandable.
+	if not result_reason.is_empty():
+		result_summary.text += "\n" + result_reason
+	result_overlay.show()
+	result_overlay.move_to_front()
+	_layout_result_ui()
+
+func _result_play_again() -> void:
+	result_overlay.hide()
+	_new_match()
+
+func _result_next_opponent() -> void:
+	result_overlay.hide()
+	if auto_battle:
+		_new_match()  # New white challenger is chosen for each spectator match.
+	else:
+		# Prefer a rival not yet defeated in this mode; never lock roster access.
+		var next_index := posmod(rival_index + 1, RIVALS.size())
+		for offset in range(1, RIVALS.size()):
+			var candidate := posmod(rival_index + offset, RIVALS.size())
+			var key := "%s_%d" % ["duboo" if duboo_mode else "classic", candidate]
+			var record: Array = rival_results.get(key, [0, 0, 0])
+			if int(record[0]) == 0:
+				next_index = candidate
+				break
+		_set_rival(next_index)
+
+func _build_tutorial() -> void:
+	tutorial_overlay = ColorRect.new()
+	tutorial_overlay.color = Color(0.005, 0.025, 0.02, 0.92)
+	tutorial_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	tutorial_overlay.visible = false
+	add_child(tutorial_overlay)
+	tutorial_panel = PanelContainer.new()
+	tutorial_panel.add_theme_stylebox_override("panel", _style(PANEL, MINT, 18))
+	tutorial_overlay.add_child(tutorial_panel)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 17)
+	tutorial_panel.add_child(column)
+	tutorial_title = _label(column, "WELCOME TO CARROM CLASSIC", 22, MINT, true)
+	tutorial_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tutorial_body = _label(column, "", 17, TEXT, true)
+	tutorial_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tutorial_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var controls := HBoxContainer.new()
+	controls.add_theme_constant_override("separation", 12)
+	column.add_child(controls)
+	var skip := _make_button(controls, "SKIP")
+	skip.pressed.connect(_finish_tutorial)
+	tutorial_next = _make_button(controls, "NEXT", true)
+	tutorial_next.pressed.connect(_advance_tutorial)
+	_update_tutorial()
+
+func _layout_tutorial() -> void:
+	if tutorial_overlay == null:
+		return
+	tutorial_overlay.position = Vector2.ZERO
+	tutorial_overlay.size = size
+	var w := minf(size.x - 32.0, 450.0)
+	var h := minf(size.y - 40.0, 340.0)
+	tutorial_panel.size = Vector2(maxf(200.0, w), maxf(180.0, h))
+	tutorial_panel.position = (size - tutorial_panel.size) * 0.5
+
+func _maybe_show_tutorial() -> void:
+	if tutorial_completed or not portrait_touch or tutorial_overlay == null:
+		return
+	tutorial_step = 0
+	_update_tutorial()
+	_layout_tutorial()
+	tutorial_overlay.show()
+	tutorial_overlay.move_to_front()
+
+func _update_tutorial() -> void:
+	if tutorial_title == null:
+		return
+	var headings := ["1 / 3  POSITION", "2 / 3  AIM", "3 / 3  SHOOT"]
+	var instructions := [
+		"Drag the striker along the bottom baseline to choose where your shot starts.",
+		"Tap or drag anywhere on the board to aim. Follow the guide to line up a counter.",
+		"Pull the grip LEFT for shot power, then release. Pocket white counters and cover the red Queen to win."
+	]
+	tutorial_title.text = headings[tutorial_step]
+	tutorial_body.text = instructions[tutorial_step]
+	tutorial_next.text = "PLAY" if tutorial_step == 2 else "NEXT"
+
+func _advance_tutorial() -> void:
+	if tutorial_step >= 2:
+		_finish_tutorial()
+	else:
+		tutorial_step += 1
+		_update_tutorial()
+
+func _finish_tutorial() -> void:
+	tutorial_completed = true
+	tutorial_overlay.hide()
+	_save_user_preferences()
 
 func _build_audio() -> void:
 	# Both modes share the same event system, but each has its own materials.
@@ -574,7 +917,7 @@ func _stat_row(parent: Node, heading: String, accent: Color) -> Array[Label]:
 func _build_ui() -> void:
 	# Portrait keeps its familiar header and own mobile menu. These two
 	# new docks are only displayed on landscape / desktop viewports.
-	title_label = _label(self, "CARROM", 29, TEXT)
+	title_label = _label(self, "CARROM CLASSIC", 29, TEXT)
 	mode_bar = HBoxContainer.new()
 	mode_bar.add_theme_constant_override("separation", 8)
 	add_child(mode_bar)
@@ -651,9 +994,9 @@ func _build_ui() -> void:
 	var identity := VBoxContainer.new()
 	identity.add_theme_constant_override("separation", 3)
 	info.add_child(identity)
-	var desktop_title := _label(identity, "CARROM", 27, TEXT)
+	var desktop_title := _label(identity, "CARROM CLASSIC", 20, TEXT)
 	desktop_title.custom_minimum_size.y = 36
-	board_caption = _label(identity, "STYLE 01 / 08  /  CLASSIC TOURNAMENT", 11, MUTED, true)
+	board_caption = _label(identity, "STYLE 01 / 08  /  CLASSIC BOARD", 11, MUTED, true)
 	board_caption.custom_minimum_size.y = 31
 	_sidebar_rule(info)
 	_label(info, "GAME MODE", 11, MINT)
@@ -686,10 +1029,11 @@ func _build_ui() -> void:
 	cpu_selector.add_item("Casual", 0)
 	cpu_selector.add_item("Standard", 1)
 	cpu_selector.add_item("Expert", 2)
-	cpu_selector.select(1)
+	cpu_selector.select(cpu_skill)
 	_style_cpu_option(cpu_selector, false)
 	cpu_selector.item_selected.connect(func(idx: int) -> void:
 		cpu_skill = idx
+		_save_user_preferences()
 		_mobile_refresh_menu()
 	)
 	info.add_child(cpu_selector)
@@ -697,6 +1041,8 @@ func _build_ui() -> void:
 	_label(info, "SPECTATOR", 11, MINT)
 	auto_battle_button = _make_button(info, "AUTO BATTLE  OFF")
 	auto_battle_button.pressed.connect(_toggle_auto_battle)
+	desktop_sound_button = _make_button(info, "SOUND ON")
+	desktop_sound_button.pressed.connect(_toggle_sound)
 	_sidebar_rule(info)
 	_label(info, "GAME INFO", 11, MINT)
 	tip_label = _label(info, "MOUSE: PLACE / AIM / HOLD TO POWER / RELEASE", 11, MUTED, true)
@@ -983,6 +1329,16 @@ func _choose_auto_rival() -> void:
 func _rival_key() -> String:
 	return "%s_%d" % ["duboo" if duboo_mode else "classic", rival_index]
 
+func _club_cleared_count() -> int:
+	var cleared := 0
+	var mode_name := "duboo" if duboo_mode else "classic"
+	for idx in range(RIVALS.size()):
+		var key := "%s_%d" % [mode_name, idx]
+		var record: Array = rival_results.get(key, [0, 0, 0])
+		if int(record[0]) > 0:
+			cleared += 1
+	return cleared
+
 func _refresh_rival_card() -> void:
 	if rival_portrait == null:
 		return
@@ -994,7 +1350,7 @@ func _refresh_rival_card() -> void:
 	rival_bio.text = str(profile["bio"])
 	_refresh_rival_drawer_handle()
 	var results: Array = rival_results.get(_rival_key(), [0, 0, 0])
-	rival_record.text = "VS YOU  %d W  /  %d L  /  %d D" % [int(results[1]), int(results[0]), int(results[2])]
+	rival_record.text = "YOUR RECORD  %d W  /  %d L  /  %d D\n%s CLUB  %d / %d DEFEATED" % [int(results[0]), int(results[1]), int(results[2]), "DUBOO" if duboo_mode else "CLASSIC", _club_cleared_count(), RIVALS.size()]
 	if auto_battle:
 		rival_record.text = "SPECTATOR / NO RECORD KEPT"
 	if rival_card_heading != null:
@@ -1006,8 +1362,8 @@ func _refresh_rival_card() -> void:
 			auto_rival_portrait.texture = RIVAL_PORTRAITS[auto_rival_index]
 			auto_rival_name.text = str(challenger["alias"])
 			auto_rival_bio.text = str(challenger["name"])
-	if mobile_rival_name != null:
-		_mobile_refresh_menu()
+	_mobile_refresh_rival_drawer()
+	_mobile_refresh_menu()
 
 func _set_rival(next_index: int) -> void:
 	var new_index := posmod(next_index, RIVALS.size())
@@ -1109,7 +1465,7 @@ func _mobile_game_tab_skin(b: Button, selected: bool, u: float) -> void:
 
 func _build_mobile_ui() -> void:
 	# Phone UI has its own hierarchy; no desktop sidebar is scaled onto a phone.
-	mobile_match_label = _mobile_label(self, "BOARD 1 / 8", 16, GOLD)
+	mobile_match_label = _mobile_label(self, "BOARD 01 / 01", 16, GOLD)
 	mobile_match_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	mobile_match_label.visible = false
 	# The game screen is NOT a scaled desktop dock. Compact modular cards,
@@ -1127,13 +1483,13 @@ func _build_mobile_ui() -> void:
 	mobile_score_panel.add_child(scores)
 	var you_stack := _mobile_score_tile(scores, MINT)
 	mobile_score_headings.append(_mobile_label(you_stack, "YOU / WHITE", 12, MINT))
-	mobile_you = _mobile_label(you_stack, "0 PTS / 0", 19, TEXT)
+	mobile_you = _mobile_label(you_stack, "0 / 9", 19, TEXT)
 	var queen_stack := _mobile_score_tile(scores, Color("#e88683"))
 	mobile_score_headings.append(_mobile_label(queen_stack, "QUEEN", 12, Color("#e88683")))
 	mobile_queen = _mobile_label(queen_stack, "ON BOARD", 12, TEXT)
 	var cpu_stack := _mobile_score_tile(scores, GOLD)
-	mobile_score_headings.append(_mobile_label(cpu_stack, "CPU / BLACK", 12, GOLD))
-	mobile_cpu = _mobile_label(cpu_stack, "0 PTS / 0", 19, TEXT)
+	mobile_score_headings.append(_mobile_label(cpu_stack, "CPU / RIVAL", 12, GOLD))
+	mobile_cpu = _mobile_label(cpu_stack, "0 / 9", 19, TEXT)
 
 	# Low-profile feedback. The colour rail communicates whose turn it is,
 	# leaving one quiet strip with an explicit action hint.
@@ -1155,6 +1511,13 @@ func _build_mobile_ui() -> void:
 	mobile_status_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	mobile_status_hint = _mobile_label(status_stack, "SLIDE STRIKER ON BASELINE", 12, TEXT)
 	mobile_status_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	mobile_status_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# A small, visible entrance to the right-side profile. Never covers the board.
+	mobile_rival_trigger = _make_button(status_row, "RIVAL >")
+	mobile_rival_trigger.tooltip_text = "View rival portrait and club record"
+	mobile_rival_trigger.size_flags_horizontal = Control.SIZE_SHRINK_END
+	mobile_rival_trigger.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	mobile_rival_trigger.pressed.connect(_mobile_open_rival_drawer)
 
 	# Independent touch shot control. Aim with a gesture on the board;
 	# drag the grip horizontally within this dock to choose strength.
@@ -1304,25 +1667,14 @@ func _build_mobile_ui() -> void:
 		b.pressed.connect(_mobile_set_difficulty.bind(i))
 		mobile_menu_difficulties.append(b)
 
-	var rival_divider := HSeparator.new()
-	rival_divider.name = "MenuRivalDivider"
-	rival_divider.add_theme_color_override("color", EDGE_SOFT)
-	menu_content.add_child(rival_divider)
-	_label(menu_content, "YOUR RIVAL", 12, MINT)
-	var mobile_rival_row := HBoxContainer.new()
-	mobile_rival_row.name = "MenuRivalChoices"
-	mobile_rival_row.add_theme_constant_override("separation", 7)
-	menu_content.add_child(mobile_rival_row)
-	mobile_rival_prev = _make_button(mobile_rival_row, "PREV")
-	mobile_rival_prev.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	mobile_rival_prev.pressed.connect(func() -> void: _set_rival(rival_index - 1))
-	mobile_rival_name = _label(mobile_rival_row, "DIEGO SOLIS", 14, TEXT, true)
-	mobile_rival_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mobile_rival_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	mobile_rival_next = _make_button(mobile_rival_row, "NEXT")
-	mobile_rival_next.size_flags_horizontal = Control.SIZE_SHRINK_END
-	mobile_rival_next.pressed.connect(func() -> void: _set_rival(rival_index + 1))
-	mobile_rival_bio = _label(menu_content, "", 12, MUTED, true)
+	# The hamburger remains the game-settings menu. Profiles live separately
+	# in the right-hand drawer so they never crowd out actions on short phones.
+	mobile_rival_menu_link = _make_button(menu_content, "VIEW RIVAL PROFILE  >")
+	mobile_rival_menu_link.name = "MenuRivalLink"
+	mobile_rival_menu_link.pressed.connect(func() -> void:
+		_mobile_close_menu()
+		_mobile_open_rival_drawer()
+	)
 
 	var actions_divider := HSeparator.new()
 	actions_divider.name = "MenuActionsDivider"
@@ -1339,19 +1691,283 @@ func _build_mobile_ui() -> void:
 		_mobile_close_menu()
 		_new_match()
 	)
+	var extra_actions := HBoxContainer.new()
+	extra_actions.name = "MenuExtras"
+	extra_actions.add_theme_constant_override("separation", 9)
+	menu_content.add_child(extra_actions)
+	mobile_auto_battle_button = _make_button(extra_actions, "AUTO BATTLE  OFF")
+	mobile_auto_battle_button.pressed.connect(func() -> void:
+		_mobile_close_menu()
+		_toggle_auto_battle()
+	)
+	mobile_sound_button = _make_button(extra_actions, "SOUND  ON")
+	mobile_sound_button.pressed.connect(_toggle_sound)
 	mobile_menu_next_board = _make_button(menu_content, "NEXT BOARD", true)
 	mobile_menu_next_board.visible = false
 	mobile_menu_next_board.pressed.connect(func() -> void:
 		_mobile_close_menu()
 		_next_board()
 	)
-	var footnote := _mobile_label(menu_content, "NEW RIVAL STARTS A FRESH MATCH", 11, MUTED)
+	var footnote := _mobile_label(menu_content, "ONE BOARD PER MATCH", 11, MUTED)
 	footnote.name = "MenuFootnote"
 	footnote.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	# No expanding spacer nodes: they formerly pushed the rival, Rules and
-	# Restart controls entirely below the screen on high-density phones.
+	# No expanding spacers: the menu remains easy to navigate on short phones.
 	menu_content.alignment = BoxContainer.ALIGNMENT_CENTER
+	_build_mobile_rival_drawer()
 	_mobile_refresh_menu()
+
+# Portrait cards are original square art. The rival stays out of the score tile:
+# a slide-in profile from the RIGHT keeps the board and main menu uncluttered.
+func _build_mobile_rival_drawer() -> void:
+	mobile_rival_drawer_scrim = ColorRect.new()
+	mobile_rival_drawer_scrim.name = "MobileRivalScrim"
+	mobile_rival_drawer_scrim.color = Color(0.01, 0.06, 0.05, 0.66)
+	mobile_rival_drawer_scrim.mouse_filter = Control.MOUSE_FILTER_STOP
+	mobile_rival_drawer_scrim.gui_input.connect(func(event: InputEvent) -> void:
+		if (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+			_mobile_close_rival_drawer()
+			get_viewport().set_input_as_handled()
+	)
+	mobile_rival_drawer_scrim.hide()
+	add_child(mobile_rival_drawer_scrim)
+
+	mobile_rival_drawer_panel = PanelContainer.new()
+	mobile_rival_drawer_panel.name = "MobileRivalRightDrawer"
+	mobile_rival_drawer_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var skin := _style(Color("#1b3932"), EDGE, 0)
+	skin.corner_radius_top_left = 18
+	skin.corner_radius_bottom_left = 18
+	skin.content_margin_left = 18
+	skin.content_margin_right = 18
+	skin.content_margin_top = 18
+	skin.content_margin_bottom = 18
+	skin.shadow_color = Color(0, 0, 0, 0.42)
+	skin.shadow_size = 14
+	mobile_rival_drawer_panel.add_theme_stylebox_override("panel", skin)
+	mobile_rival_drawer_panel.hide()
+	add_child(mobile_rival_drawer_panel)
+
+	mobile_rival_drawer_outer = VBoxContainer.new()
+	mobile_rival_drawer_outer.add_theme_constant_override("separation", 13)
+	mobile_rival_drawer_panel.add_child(mobile_rival_drawer_outer)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 10)
+	mobile_rival_drawer_outer.add_child(head)
+	mobile_rival_drawer_header_label = _label(head, "RIVAL PROFILE", 21, MINT, true)
+	mobile_rival_drawer_header_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mobile_rival_drawer_header_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	mobile_rival_drawer_close = _make_button(head, "CLOSE")
+	mobile_rival_drawer_close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	mobile_rival_drawer_close.custom_minimum_size = Vector2(90, 50)
+	mobile_rival_drawer_close.pressed.connect(func() -> void: _mobile_close_rival_drawer())
+
+	var separator := HSeparator.new()
+	separator.add_theme_color_override("color", EDGE_SOFT)
+	mobile_rival_drawer_outer.add_child(separator)
+	mobile_rival_drawer_scroll = ScrollContainer.new()
+	mobile_rival_drawer_scroll.name = "MobileRivalProfileScroll"
+	mobile_rival_drawer_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	mobile_rival_drawer_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	mobile_rival_drawer_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mobile_rival_drawer_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mobile_rival_drawer_outer.add_child(mobile_rival_drawer_scroll)
+	mobile_rival_drawer_content = VBoxContainer.new()
+	mobile_rival_drawer_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mobile_rival_drawer_content.add_theme_constant_override("separation", 14)
+	mobile_rival_drawer_scroll.add_child(mobile_rival_drawer_content)
+
+	var portrait_center := CenterContainer.new()
+	mobile_rival_drawer_content.add_child(portrait_center)
+	mobile_rival_drawer_portrait = TextureRect.new()
+	mobile_rival_drawer_portrait.custom_minimum_size = Vector2(216, 216)
+	mobile_rival_drawer_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	mobile_rival_drawer_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	mobile_rival_drawer_portrait.clip_contents = true
+	mobile_rival_drawer_portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	portrait_center.add_child(mobile_rival_drawer_portrait)
+
+	var profile := VBoxContainer.new()
+	profile.add_theme_constant_override("separation", 4)
+	mobile_rival_drawer_content.add_child(profile)
+	mobile_rival_drawer_name = _label(profile, "", 28, TEXT, true)
+	mobile_rival_drawer_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mobile_rival_drawer_alias = _label(profile, "", 21, GOLD, true)
+	mobile_rival_drawer_alias.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mobile_rival_drawer_type = _label(profile, "", 16, MINT, true)
+	mobile_rival_drawer_type.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	mobile_rival_drawer_bio_card = PanelContainer.new()
+	var bio_skin := _style(PANEL_ALT, EDGE_SOFT, 12)
+	bio_skin.content_margin_left = 14
+	bio_skin.content_margin_right = 14
+	bio_skin.content_margin_top = 14
+	bio_skin.content_margin_bottom = 14
+	mobile_rival_drawer_bio_card.add_theme_stylebox_override("panel", bio_skin)
+	mobile_rival_drawer_content.add_child(mobile_rival_drawer_bio_card)
+	mobile_rival_drawer_bio = _label(mobile_rival_drawer_bio_card, "", 18, TEXT, true)
+	mobile_rival_drawer_bio.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+
+	mobile_rival_drawer_record_card = PanelContainer.new()
+	mobile_rival_drawer_record_card.add_theme_stylebox_override("panel", _style(Color("#233f38"), EDGE_SOFT, 10))
+	mobile_rival_drawer_content.add_child(mobile_rival_drawer_record_card)
+	var record_col := VBoxContainer.new()
+	record_col.add_theme_constant_override("separation", 7)
+	mobile_rival_drawer_record_card.add_child(record_col)
+	mobile_rival_drawer_record = _label(record_col, "", 17, GOLD, true)
+	mobile_rival_drawer_record.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mobile_rival_drawer_progress = _label(record_col, "", 16, MINT, true)
+	mobile_rival_drawer_progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	# Navigation stays visible even while the biography is being scrolled.
+	mobile_rival_drawer_footer = VBoxContainer.new()
+	mobile_rival_drawer_footer.add_theme_constant_override("separation", 9)
+	mobile_rival_drawer_outer.add_child(mobile_rival_drawer_footer)
+	var bottom_separator := HSeparator.new()
+	bottom_separator.add_theme_color_override("color", EDGE_SOFT)
+	mobile_rival_drawer_footer.add_child(bottom_separator)
+	mobile_rival_drawer_counter = _label(mobile_rival_drawer_footer, "", 16, MUTED)
+	mobile_rival_drawer_counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mobile_rival_drawer_arrows = HBoxContainer.new()
+	mobile_rival_drawer_arrows.add_theme_constant_override("separation", 11)
+	mobile_rival_drawer_footer.add_child(mobile_rival_drawer_arrows)
+	mobile_rival_drawer_prev = _make_button(mobile_rival_drawer_arrows, "PREVIOUS")
+	mobile_rival_drawer_next = _make_button(mobile_rival_drawer_arrows, "NEXT RIVAL", true)
+	mobile_rival_drawer_prev.custom_minimum_size.y = 60
+	mobile_rival_drawer_next.custom_minimum_size.y = 60
+	mobile_rival_drawer_prev.pressed.connect(func() -> void:
+		_set_rival(rival_index - 1)
+		mobile_rival_drawer_scroll.scroll_vertical = 0
+	)
+	mobile_rival_drawer_next.pressed.connect(func() -> void:
+		_set_rival(rival_index + 1)
+		mobile_rival_drawer_scroll.scroll_vertical = 0
+	)
+	mobile_rival_drawer_footnote = _label(mobile_rival_drawer_footer, "CHANGING RIVALS STARTS A FRESH MATCH", 13, MUTED, true)
+	mobile_rival_drawer_footnote.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mobile_refresh_rival_drawer()
+
+func _mobile_refresh_rival_drawer() -> void:
+	if mobile_rival_drawer_portrait == null:
+		return
+	var rival: Dictionary = RIVALS[rival_index]
+	mobile_rival_drawer_portrait.texture = RIVAL_PORTRAITS[rival_index]
+	mobile_rival_drawer_name.text = str(rival["name"])
+	mobile_rival_drawer_alias.text = str(rival["alias"])
+	mobile_rival_drawer_type.text = str(rival["type"])
+	mobile_rival_drawer_bio.text = str(rival["bio"])
+	mobile_rival_drawer_counter.text = "RIVAL  %02d / %02d" % [rival_index + 1, RIVALS.size()]
+	var record: Array = rival_results.get(_rival_key(), [0, 0, 0])
+	mobile_rival_drawer_record.text = "AUTO BATTLE  /  SPECTATOR" if auto_battle else ("YOUR RECORD  %dW  /  %dL  /  %dD" % [int(record[0]), int(record[1]), int(record[2])])
+	mobile_rival_drawer_progress.text = "%s CLUB  %d / %d DEFEATED" % ["DUBOO" if duboo_mode else "CLASSIC", _club_cleared_count(), RIVALS.size()]
+
+func _layout_mobile_rival_drawer() -> void:
+	if mobile_rival_drawer_panel == null:
+		return
+	mobile_rival_drawer_scrim.position = Vector2.ZERO
+	mobile_rival_drawer_scrim.size = size
+	if size.x <= 1.0 or size.y <= 1.0:
+		return
+	# Use the same viewport-based scaling strategy as the main mobile UI.
+	# The old 370 * 1.4 cap made the profile look miniature on tall phones.
+	var portrait_layout := size.y > size.x
+	var u := clampf(minf(size.x / 430.0, size.y / 850.0), 0.85, 2.35)
+	var edge := maxf(8.0, 11.0 * u)
+	var width_fraction := 0.90 if portrait_layout else 0.53
+	var width := minf(size.x - 2.0 * edge, minf(490.0 * u, size.x * width_fraction))
+	var height := maxf(0.0, size.y - edge * 2.0)
+	mobile_rival_drawer_panel.size = Vector2(width, height)
+	mobile_rival_drawer_panel.position = Vector2(size.x - width if mobile_rival_drawer_open else size.x, edge)
+	# Scale the layout's whitespace as well as the type: otherwise portrait,
+	# buttons, and text still look like a tiny block at the top of the drawer.
+	var skin := mobile_rival_drawer_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	skin.content_margin_left = 18.0 * u
+	skin.content_margin_right = 18.0 * u
+	skin.content_margin_top = 17.0 * u
+	skin.content_margin_bottom = 17.0 * u
+	skin.corner_radius_top_left = maxi(14, int(round(18.0 * u)))
+	skin.corner_radius_bottom_left = maxi(14, int(round(18.0 * u)))
+	mobile_rival_drawer_panel.add_theme_stylebox_override("panel", skin)
+	mobile_rival_drawer_outer.add_theme_constant_override("separation", maxi(8, int(round(13.0 * u))))
+	mobile_rival_drawer_content.add_theme_constant_override("separation", maxi(10, int(round(16.0 * u))))
+	mobile_rival_drawer_header_label.add_theme_font_size_override("font_size", maxi(19, int(round(21.0 * u))))
+	mobile_rival_drawer_close.custom_minimum_size = Vector2(92.0 * u, 51.0 * u)
+	mobile_rival_drawer_close.add_theme_font_size_override("font_size", maxi(16, int(round(16.0 * u))))
+	_mobile_button_skin(mobile_rival_drawer_close, false, u)
+	# Portraits are already square; preserve their ratio without distortion.
+	var artwork_size := minf(222.0 * u, width - 75.0 * u)
+	mobile_rival_drawer_portrait.custom_minimum_size = Vector2(artwork_size, artwork_size)
+	(mobile_rival_drawer_name.get_parent() as VBoxContainer).add_theme_constant_override("separation", maxi(4, int(round(6.0 * u))))
+	mobile_rival_drawer_name.add_theme_font_size_override("font_size", maxi(25, int(round(28.0 * u))))
+	mobile_rival_drawer_alias.add_theme_font_size_override("font_size", maxi(19, int(round(22.0 * u))))
+	mobile_rival_drawer_type.add_theme_font_size_override("font_size", maxi(15, int(round(16.0 * u))))
+	var bio_skin := mobile_rival_drawer_bio_card.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	bio_skin.content_margin_left = 15.0 * u
+	bio_skin.content_margin_right = 15.0 * u
+	bio_skin.content_margin_top = 14.0 * u
+	bio_skin.content_margin_bottom = 14.0 * u
+	mobile_rival_drawer_bio_card.add_theme_stylebox_override("panel", bio_skin)
+	mobile_rival_drawer_bio.add_theme_font_size_override("font_size", maxi(17, int(round(18.0 * u))))
+	var record_skin := mobile_rival_drawer_record_card.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	record_skin.content_margin_left = 13.0 * u
+	record_skin.content_margin_right = 13.0 * u
+	record_skin.content_margin_top = 15.0 * u
+	record_skin.content_margin_bottom = 15.0 * u
+	mobile_rival_drawer_record_card.add_theme_stylebox_override("panel", record_skin)
+	(mobile_rival_drawer_record.get_parent() as VBoxContainer).add_theme_constant_override("separation", maxi(6, int(round(9.0 * u))))
+	mobile_rival_drawer_record.add_theme_font_size_override("font_size", maxi(16, int(round(17.0 * u))))
+	mobile_rival_drawer_progress.add_theme_font_size_override("font_size", maxi(15, int(round(16.0 * u))))
+	mobile_rival_drawer_footer.add_theme_constant_override("separation", maxi(6, int(round(10.0 * u))))
+	mobile_rival_drawer_counter.add_theme_font_size_override("font_size", maxi(15, int(round(16.0 * u))))
+	mobile_rival_drawer_arrows.add_theme_constant_override("separation", maxi(8, int(round(11.0 * u))))
+	for b in [mobile_rival_drawer_prev, mobile_rival_drawer_next]:
+		b.custom_minimum_size.y = maxf(53.0, 59.0 * u)
+		b.add_theme_font_size_override("font_size", maxi(16, int(round(18.0 * u))))
+		_mobile_button_skin(b, b == mobile_rival_drawer_next, u)
+	mobile_rival_drawer_footnote.add_theme_font_size_override("font_size", maxi(12, int(round(13.0 * u))))
+
+func _mobile_open_rival_drawer() -> void:
+	if not portrait_touch or mobile_rival_drawer_open or rules_overlay.visible or result_overlay.visible:
+		return
+	_mobile_close_menu()
+	_cancel_mobile_charge()
+	mobile_board_finger = -1
+	mobile_board_mouse_down = false
+	_mobile_refresh_rival_drawer()
+	if mobile_rival_drawer_tween != null and mobile_rival_drawer_tween.is_running():
+		mobile_rival_drawer_tween.kill()
+	mobile_rival_drawer_open = false
+	_layout_mobile_rival_drawer()
+	mobile_rival_drawer_open = true
+	mobile_rival_drawer_scrim.show()
+	mobile_rival_drawer_panel.show()
+	mobile_rival_drawer_scrim.move_to_front()
+	mobile_rival_drawer_panel.move_to_front()
+	mobile_rival_drawer_tween = create_tween()
+	mobile_rival_drawer_tween.set_trans(Tween.TRANS_CUBIC)
+	mobile_rival_drawer_tween.set_ease(Tween.EASE_OUT)
+	mobile_rival_drawer_tween.tween_property(mobile_rival_drawer_panel, "position:x", size.x - mobile_rival_drawer_panel.size.x, 0.27)
+	if sound_click != null:
+		sound_click.play()
+
+func _mobile_close_rival_drawer(immediate: bool = false) -> void:
+	if mobile_rival_drawer_panel == null:
+		return
+	if mobile_rival_drawer_tween != null and mobile_rival_drawer_tween.is_running():
+		mobile_rival_drawer_tween.kill()
+	mobile_rival_drawer_open = false
+	if immediate or not mobile_rival_drawer_panel.visible:
+		mobile_rival_drawer_scrim.hide()
+		mobile_rival_drawer_panel.hide()
+		return
+	mobile_rival_drawer_tween = create_tween()
+	mobile_rival_drawer_tween.set_trans(Tween.TRANS_CUBIC)
+	mobile_rival_drawer_tween.set_ease(Tween.EASE_IN)
+	mobile_rival_drawer_tween.tween_property(mobile_rival_drawer_panel, "position:x", size.x, 0.21)
+	mobile_rival_drawer_tween.finished.connect(func() -> void:
+		if not mobile_rival_drawer_open:
+			mobile_rival_drawer_scrim.hide()
+			mobile_rival_drawer_panel.hide()
+	)
 
 func _mobile_menu_outside_input(event: InputEvent) -> void:
 	if (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
@@ -1367,6 +1983,7 @@ func _mobile_toggle_menu() -> void:
 func _mobile_open_menu() -> void:
 	if not portrait_touch or mobile_menu_open or rules_overlay.visible:
 		return
+	_mobile_close_rival_drawer(true)
 	_cancel_mobile_charge()
 	mobile_board_finger = -1
 	mobile_board_mouse_down = false
@@ -1395,6 +2012,7 @@ func _mobile_close_menu() -> void:
 func _mobile_set_difficulty(index: int) -> void:
 	cpu_skill = index
 	cpu_selector.select(index)
+	_save_user_preferences()
 	_mobile_refresh_menu()
 	if sound_click != null:
 		sound_click.play()
@@ -1408,15 +2026,16 @@ func _mobile_refresh_menu() -> void:
 	mobile_menu_style_count.text = "%02d / %02d" % [index + 1, names.size()]
 	for i in range(mobile_menu_difficulties.size()):
 		_mobile_button_skin(mobile_menu_difficulties[i], i == cpu_skill, mobile_modal_scale)
-	if mobile_rival_name != null:
-		var selected: Dictionary = RIVALS[rival_index]
-		mobile_rival_name.text = str(selected["name"]) + "\n" + str(selected["alias"])
-		mobile_rival_bio.text = ("BLACK RIVAL / WHITE FACES %s" % _rival_alias_for_player(0)) if auto_battle else str(selected["bio"])
+
 	if mobile_menu_restart != null:
 		mobile_menu_restart.text = "NEW BOARD" if duboo_mode else "RESTART"
+	if mobile_auto_battle_button != null:
+		mobile_auto_battle_button.text = "AUTO BATTLE  ON" if auto_battle else "AUTO BATTLE  OFF"
+	if mobile_sound_button != null:
+		mobile_sound_button.text = "SOUND  ON" if sound_enabled else "SOUND  OFF"
 	if mobile_menu_next_board != null:
 		mobile_menu_next_board.visible = phase == "board_over" and not duboo_mode
-	# Rival text and the NEXT BOARD action can change the dialog's minimum.
+	# The NEXT BOARD action can change the dialog's minimum.
 	if mobile_menu_open and portrait_touch:
 		call_deferred("_mobile_fit_dialogs")
 
@@ -1424,11 +2043,11 @@ func _mobile_refresh_menu() -> void:
 func _mobile_sync() -> void:
 	if mobile_score_panel == null:
 		return
-	mobile_you.text = "%d / 9" % _pocketed_count("white") if duboo_mode else "%d PTS / %d" % [totals[0], _pocketed_count("white")]
-	mobile_cpu.text = "%d / 9" % _pocketed_count("black") if duboo_mode else "%d PTS / %d" % [totals[1], _pocketed_count("black")]
+	mobile_you.text = "%d / 9" % _pocketed_count("white")
+	mobile_cpu.text = "%d / 9" % _pocketed_count("black")
 	if mobile_score_headings.size() >= 3:
-		mobile_score_headings[0].text = "WHITE\n%s" % _rival_alias_for_player(0) if auto_battle else "YOU / WHITE"
-		mobile_score_headings[2].text = "BLACK\n%s" % _rival_alias_for_player(1) if auto_battle else "CPU / BLACK"
+		mobile_score_headings[0].text = "CPU / WHITE" if auto_battle else "YOU / WHITE"
+		mobile_score_headings[2].text = "CPU / RIVAL"
 	if pending_queen >= 0:
 		mobile_queen.text = ("WHITE COVER" if pending_queen == 0 else "BLACK COVER") if auto_battle else ("COVER IT" if pending_queen == 0 else "CPU COVER")
 	elif queen_owner >= 0:
@@ -1544,7 +2163,7 @@ func _build_rules_overlay() -> void:
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 10)
 	column.add_child(header)
-	rules_title_label = _label(header, "CARROM  /  RULES", 21, MINT)
+	rules_title_label = _label(header, "CARROM CLASSIC  /  RULES", 21, MINT)
 	rules_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	rules_close_button = _make_button(header, "CLOSE", true)
 	rules_close_button.size_flags_horizontal = Control.SIZE_SHRINK_END
@@ -1564,7 +2183,7 @@ func _build_rules_overlay() -> void:
 	details.add_theme_constant_override("separation", 12)
 	desktop_rules_scroll.add_child(details)
 	rules_body = _label(details,
-		"OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nWhite breaks. You keep shooting whenever you pocket at least one of your own pieces; otherwise the turn passes. Opponent pieces remain pocketed if you sink them.\n\nTHE QUEEN\nYou must pocket one of your own pieces before you can claim the Queen. Pocket the Queen and one of your own pieces in the same shot, or pocket your own piece on your very next shot to cover it. An uncovered Queen returns to the center. If you capture the Queen together with your very first piece, a further cover is required.\n\nSTRIKER FOUL\nPocketing the striker costs one of your previously pocketed pieces (or incurs one owed piece if none is available), and ends your turn.\n\nSCORING\nThe board winner scores one point for each opponent piece left on the board. The Queen adds three points if secured by the winner, or one when their pre-board match score is at least 22. First to 25 points or the leader after eight boards wins.\n\nThis is a playable standard-rules adaptation: specialist referee calls and uncommon compound fouls are simplified.",
+		"OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nWhite breaks. You keep shooting whenever you pocket at least one of your own pieces; otherwise the turn passes. Opponent pieces remain pocketed if you sink them.\n\nTHE QUEEN\nYou must pocket one of your own pieces before you can claim the Queen. Pocket the Queen and one of your own pieces in the same shot, or pocket your own piece on your very next shot to cover it. An uncovered Queen returns to the center. If you capture the Queen together with your very first piece, a further cover is required.\n\nSTRIKER FOUL\nPocketing the striker costs one of your previously pocketed pieces (or incurs one owed piece if none is available), and ends your turn.\n\nWINNING\nSecure the Queen legally and complete the board to win. The scoreboard shows how many of your nine pieces are pocketed.\n\nThis is a playable standard-rules adaptation: specialist referee calls and uncommon compound fouls are simplified.",
 		14, TEXT, true)
 
 	mobile_rules_content = VBoxContainer.new()
@@ -1627,7 +2246,7 @@ func _mobile_refresh_rules() -> void:
 			["TAKING TURNS", "White breaks. Pocket your colour to play again; otherwise turns switch."],
 			["THE QUEEN", "Pocket one of yours first. Cover the Queen now or on your next shot, or it returns. Your first piece alone cannot cover it."],
 			["STRIKER FOUL", "Pocketing the striker ends your turn and returns one piece, or creates a debt."],
-			["SCORING", "Earn 1 point per opponent piece left. The Queen adds 3, or 1 at 22+ match points. One-board match."],
+			["WINNING", "Finish one board with the Queen legally covered to win. Pieces pocketed are shown out of nine."],
 			["TOUCH CONTROLS", touch]
 		]
 	# The guide intentionally becomes shorter *before* the dialog fills a
@@ -1645,7 +2264,7 @@ func _mobile_refresh_rules() -> void:
 			sections = [
 				["OBJECTIVE & TURNS", "Pocket nine white pieces. White breaks; pocket yours to play again."],
 				["THE QUEEN", "Take one of yours first. Cover the Queen now or next shot, or it returns. Your first piece needs a later cover."],
-				["FOUL & SCORE", "Striker pocket ends your turn and costs a piece. Score pieces left; Queen adds 3 (1 at 22+)."],
+				["FOUL & WIN", "A pocketed striker ends your turn and costs a piece. Secure the Queen to win the board."],
 				["TOUCH CONTROLS", touch]
 			]
 	if portrait_touch and (size.y < 555.0 or size.x < 305.0):
@@ -1658,7 +2277,7 @@ func _mobile_refresh_rules() -> void:
 		else:
 			sections = [
 				["PLAY", "Pocket nine white pieces. Pot yours to play again; cover the Queen now or next."],
-				["FOUL & SCORE", "A pocketed striker costs a piece and ends your turn. Count remaining CPU pieces; Queen adds points."],
+				["FOUL & WIN", "A pocketed striker costs a piece and ends your turn. Secure the Queen to win the board."],
 				["CONTROLS", "Slide striker on baseline. Aim on the board. Pull grip LEFT and release to shoot."]
 			]
 	for i in range(mobile_rules_cards.size()):
@@ -1709,7 +2328,7 @@ func _refresh_mode_ui() -> void:
 		if duboo_mode:
 			rules_body.text = "DUBOO - KARACHI-INSPIRED\nPlay a single board on a large slate/marble-style table with smaller counters, compact markings, and an oversize open-centred acrylic ring. The ring is much larger than the pocket and cannot fall into it. The physics are gameplay approximations.\n\nPLAY\nClick the bottom baseline to position the ring. Aim, hold left mouse to charge, then release. The controls are identical to Classic.\n\nOBJECTIVE\nPocket all nine of your colour and legally secure the Queen. Pocket your colour to shoot again. CPU plays black.\n\nQUEEN AND FOULS\nQueen and cover rules follow this game's existing adaptation. A ring-pocket foul is impossible because the ring cannot fit a hole.\n\nMATCH\nA single completed board determines the winner. Select NEW BOARD to restart."
 		else:
-			rules_body.text = "OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nYou keep shooting whenever you pocket your color; otherwise the turn passes.\n\nTHE QUEEN\nYou must first pocket a piece of your color. Pocket the Queen and another piece in the same shot or cover it on your next shot. If not covered, she returns to the center.\n\nSTRIKER FOUL\nPocketing the striker costs one of your pocketed pieces, or creates an owed piece, and ends the turn.\n\nSCORING\nFirst to 25 points or the leader after eight boards wins. Uncommon compound fouls are simplified."
+			rules_body.text = "OBJECTIVE\nYou are WHITE. Pocket all nine white pieces, with the red Queen legally covered, to win the board. The CPU plays BLACK.\n\nTURNS\nYou keep shooting whenever you pocket your color; otherwise the turn passes.\n\nTHE QUEEN\nYou must first pocket a piece of your color. Pocket the Queen and another piece in the same shot or cover it on your next shot. If not covered, she returns to the center.\n\nSTRIKER FOUL\nPocketing the striker costs one of your pocketed pieces, or creates an owed piece, and ends the turn.\n\nWINNING\nSecure the Queen legally and complete the board to win. Uncommon compound fouls are simplified."
 	_mobile_refresh_rules()
 	_refresh_board_style_ui()
 	_refresh_rival_card()
@@ -1725,6 +2344,7 @@ func _shot_speed_max() -> float:
 func _layout() -> void:
 	if board == null or side_panel == null or stats_panel == null:
 		return
+	_layout_tutorial()
 	var sz := size
 	var tall_screen := sz.y > sz.x * 1.06
 	# Android phones and tablets need touch controls even when rotated.
@@ -1732,6 +2352,7 @@ func _layout() -> void:
 	var should_touch := tall_screen or OS.has_feature("android") or OS.has_feature("ios") or DisplayServer.is_touchscreen_available()
 	if should_touch != portrait_touch:
 		_mobile_close_menu()
+		_mobile_close_rival_drawer(true)
 		_cancel_mobile_charge()
 		mobile_board_finger = -1
 		mobile_board_mouse_down = false
@@ -1749,11 +2370,13 @@ func _layout() -> void:
 			_layout_portrait(sz)
 		else:
 			_layout_touch_landscape(sz)
+		_layout_result_ui()
 		return
 	for mobile_node in [mobile_score_panel, mobile_status_panel, mobile_power_panel, mobile_match_label, mobile_menu_button, mobile_header_subtitle]:
 		mobile_node.visible = false
 	mobile_menu_scrim.hide()
 	mobile_menu_panel.hide()
+	_mobile_close_rival_drawer(true)
 	title_label.visible = false
 	mode_bar.visible = false
 	stats_panel.visible = true
@@ -1787,6 +2410,7 @@ func _layout() -> void:
 	var dialog_size := Vector2(minf(640.0, sz.x - 65.0), minf(740.0, sz.y - 42.0))
 	rules_overlay.position = (sz - dialog_size) * 0.5
 	rules_overlay.size = dialog_size
+	_layout_result_ui()
 
 func _layout_touch_landscape(sz: Vector2) -> void:
 	# Tablet landscape: board on the left, actual touch controls to the right.
@@ -1814,7 +2438,7 @@ func _layout_touch_landscape(sz: Vector2) -> void:
 	var header_h := 42.0 * u
 	title_label.position = Vector2(right_x, y - 3.0 * u)
 	title_label.size = Vector2(right_w * 0.43, 29.0 * u)
-	title_label.add_theme_font_size_override("font_size", maxi(16, int(round(25.0 * u))))
+	title_label.add_theme_font_size_override("font_size", maxi(12, int(round(16.0 * u))))
 	mobile_header_subtitle.position = Vector2(right_x, y + 25.0 * u)
 	mobile_header_subtitle.size = Vector2(right_w * 0.44, 14.0 * u)
 	mobile_header_subtitle.add_theme_font_size_override("font_size", maxi(9, int(round(10.0 * u))))
@@ -1848,6 +2472,7 @@ func _layout_touch_landscape(sz: Vector2) -> void:
 		heading.add_theme_font_size_override("font_size", maxi(10, int(round(12.0 * u))))
 	mobile_you.add_theme_font_size_override("font_size", maxi(14, int(round(18.0 * u))))
 	mobile_cpu.add_theme_font_size_override("font_size", maxi(14, int(round(18.0 * u))))
+	mobile_score_headings[2].add_theme_font_size_override("font_size", maxi(12, int(round(11.8 * u))))
 	mobile_queen.add_theme_font_size_override("font_size", maxi(10, int(round(12.0 * u))))
 	y += 69.0 * u
 	mobile_status_panel.position = Vector2(right_x, y)
@@ -1860,6 +2485,9 @@ func _layout_touch_landscape(sz: Vector2) -> void:
 	mobile_status_panel.add_theme_stylebox_override("panel", turn_skin)
 	mobile_status_title.add_theme_font_size_override("font_size", maxi(12, int(round(15.0 * u))))
 	mobile_status_hint.add_theme_font_size_override("font_size", maxi(10, int(round(12.0 * u))))
+	mobile_rival_trigger.custom_minimum_size = Vector2(68.0 * u, 32.0 * u)
+	mobile_rival_trigger.add_theme_font_size_override("font_size", maxi(10, int(round(11.0 * u))))
+	_mobile_button_skin(mobile_rival_trigger, false, u)
 	# Reserve the bottom of the right lane for the swipe grip.
 	var dock_h := 104.0 * u
 	mobile_power_panel.position = Vector2(right_x, sz.y - gutter - dock_h)
@@ -1882,6 +2510,7 @@ func _layout_touch_landscape(sz: Vector2) -> void:
 	_mobile_menu_layout(mobile_modal_scale)
 	_mobile_rules_layout(mobile_modal_scale)
 	_mobile_fit_dialogs()
+	_layout_mobile_rival_drawer()
 	_mobile_sync()
 
 func _layout_portrait(sz: Vector2) -> void:
@@ -1926,7 +2555,7 @@ func _layout_portrait(sz: Vector2) -> void:
 	# framed menu trigger. No desktop assets or text get resized here.
 	title_label.position = Vector2(gutter + 1.0 * u, y - 3.0 * u)
 	title_label.size = Vector2(sz.x * 0.46, 29.0 * u)
-	title_label.add_theme_font_size_override("font_size", maxi(22, int(round(27.0 * u))))
+	title_label.add_theme_font_size_override("font_size", maxi(13, int(round(16.0 * u))))
 	mobile_header_subtitle.position = Vector2(gutter + 2.0 * u, y + 28.0 * u)
 	mobile_header_subtitle.size = Vector2(sz.x * 0.47, 14.0 * u)
 	mobile_header_subtitle.add_theme_font_size_override("font_size", maxi(10, int(round(10.0 * u))))
@@ -1971,6 +2600,7 @@ func _layout_portrait(sz: Vector2) -> void:
 		heading.add_theme_font_size_override("font_size", maxi(12, int(round(11.8 * u))))
 	mobile_you.add_theme_font_size_override("font_size", maxi(16, int(round(18.5 * u))))
 	mobile_cpu.add_theme_font_size_override("font_size", maxi(16, int(round(18.5 * u))))
+	mobile_score_headings[2].add_theme_font_size_override("font_size", maxi(12, int(round(11.8 * u))))
 	mobile_queen.add_theme_font_size_override("font_size", maxi(12, int(round(12.4 * u))))
 	y += scores_h + gap_score
 
@@ -1991,8 +2621,11 @@ func _layout_portrait(sz: Vector2) -> void:
 	turn_row.add_theme_constant_override("separation", maxi(8, int(round(10.0 * u))))
 	mobile_turn_accent.custom_minimum_size.x = 3.0 * u
 	mobile_status_title.add_theme_font_size_override("font_size", maxi(15, int(round(15.0 * u))))
-	mobile_status_hint.add_theme_font_size_override("font_size", maxi(12, int(round(11.5 * u))))
+	mobile_status_hint.add_theme_font_size_override("font_size", maxi(11, int(round(11.5 * u))))
 	(mobile_status_title.get_parent() as VBoxContainer).add_theme_constant_override("separation", maxi(1, int(round(2.0 * u))))
+	mobile_rival_trigger.custom_minimum_size = Vector2(74.0 * u, 31.0 * u)
+	mobile_rival_trigger.add_theme_font_size_override("font_size", maxi(10, int(round(11.0 * u))))
+	_mobile_button_skin(mobile_rival_trigger, false, u)
 	y += status_h + gap_board + rhythm_add
 
 	var board_scale := board_width / 766.0
@@ -2036,6 +2669,7 @@ func _layout_portrait(sz: Vector2) -> void:
 	_mobile_menu_layout(modal_u)
 	_mobile_rules_layout(modal_u)
 	_mobile_fit_dialogs()
+	_layout_mobile_rival_drawer()
 	_mobile_sync()
 
 func _mobile_fit_dialogs() -> void:
@@ -2081,8 +2715,6 @@ func _mobile_menu_layout(u: float) -> void:
 	var short_screen := size.y < 680.0
 	var ultra_short := size.y < 575.0
 	(content.get_node("MenuFootnote") as Label).visible = not short_screen
-	mobile_rival_bio.visible = not ultra_short
-	(content.get_node("MenuRivalDivider") as HSeparator).visible = not ultra_short
 	(content.get_node("MenuActionsDivider") as HSeparator).visible = not ultra_short
 	var menu_skin := mobile_menu_panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
 	menu_skin.content_margin_left = 13.0 * u
@@ -2134,21 +2766,16 @@ func _mobile_menu_layout(u: float) -> void:
 		b.custom_minimum_size.y = maxf(46.0, 45.0 * u)
 		b.add_theme_font_size_override("font_size", maxi(13, int(round(13.0 * u))))
 
-	var rival_row := content.get_node("MenuRivalChoices") as HBoxContainer
-	rival_row.add_theme_constant_override("separation", maxi(5, int(round(7.0 * u))))
-	for b in [mobile_rival_prev, mobile_rival_next]:
-		b.custom_minimum_size = Vector2(54.0 * u, maxf(44.0, 44.0 * u))
-		b.add_theme_font_size_override("font_size", maxi(14, int(round(13.0 * u))))
-		_mobile_button_skin(b, false, u)
-	mobile_rival_name.add_theme_font_size_override("font_size", maxi(15, int(round(14.0 * u))))
-	mobile_rival_bio.add_theme_font_size_override("font_size", maxi(14, int(round(12.5 * u))))
-	# A short two-line description is part of the settings composition, not
-	# an expanding text area that shoves actions out of view.
-	mobile_rival_bio.max_lines_visible = 2
+	if mobile_rival_menu_link != null:
+		mobile_rival_menu_link.custom_minimum_size.y = maxf(43.0, 43.0 * u)
+		mobile_rival_menu_link.add_theme_font_size_override("font_size", maxi(13, int(round(13.0 * u))))
+		_mobile_button_skin(mobile_rival_menu_link, false, u)
 
 	var actions := content.get_node("MenuActions") as HBoxContainer
 	actions.add_theme_constant_override("separation", maxi(7, int(round(9.0 * u))))
-	for b in [mobile_menu_rules, mobile_menu_restart, mobile_menu_next_board]:
+	var extras := content.get_node("MenuExtras") as HBoxContainer
+	extras.add_theme_constant_override("separation", maxi(7, int(round(9.0 * u))))
+	for b in [mobile_menu_rules, mobile_menu_restart, mobile_menu_next_board, mobile_auto_battle_button, mobile_sound_button]:
 		b.custom_minimum_size.y = maxf(47.0, 47.0 * u)
 		b.add_theme_font_size_override("font_size", maxi(16, int(round(15.0 * u))))
 		_mobile_button_skin(b, b == mobile_menu_next_board, u)
@@ -2198,6 +2825,10 @@ func _load_board_style() -> void:
 	rival_index = randi_range(0, RIVALS.size() - 1)
 	var config := ConfigFile.new()
 	if FileAccess.file_exists(SETTINGS_PATH) and config.load(SETTINGS_PATH) == OK:
+		rival_index = clampi(int(config.get_value("rivals", "selected", rival_index)), 0, RIVALS.size() - 1)
+		cpu_skill = clampi(int(config.get_value("game", "difficulty", 1)), 0, 2)
+		sound_enabled = bool(config.get_value("game", "sound", true))
+		tutorial_completed = bool(config.get_value("onboarding", "completed", false))
 		board_style_index = clampi(int(config.get_value("appearance", "board_style", 0)), 0, CarromBoard.STYLE_NAMES.size() - 1)
 		duboo_style_index = clampi(int(config.get_value("appearance", "duboo_table_style", 0)), 0, CarromBoard.DUBOO_STYLE_NAMES.size() - 1)
 		for game in ["classic", "duboo"]:
@@ -2213,6 +2844,32 @@ func _save_board_style() -> void:
 	config.set_value("appearance", "board_style", board_style_index)
 	config.set_value("appearance", "duboo_table_style", duboo_style_index)
 	config.save(SETTINGS_PATH)
+
+func _save_user_preferences() -> void:
+	var config := ConfigFile.new()
+	if FileAccess.file_exists(SETTINGS_PATH):
+		config.load(SETTINGS_PATH)
+	config.set_value("game", "difficulty", cpu_skill)
+	config.set_value("game", "sound", sound_enabled)
+	config.set_value("rivals", "selected", rival_index)
+	config.set_value("onboarding", "completed", tutorial_completed)
+	config.save(SETTINGS_PATH)
+
+func _apply_sound_state() -> void:
+	# No extra audio buses are needed for an all-or-nothing SFX switch.
+	var master := AudioServer.get_bus_index("Master")
+	if master >= 0:
+		AudioServer.set_bus_mute(master, not sound_enabled)
+	if desktop_sound_button != null:
+		desktop_sound_button.text = "SOUND ON" if sound_enabled else "SOUND OFF"
+	if mobile_sound_button != null:
+		mobile_sound_button.text = "SOUND  ON" if sound_enabled else "SOUND  OFF"
+
+func _toggle_sound() -> void:
+	sound_enabled = not sound_enabled
+	_apply_sound_state()
+	_save_user_preferences()
+	_mobile_refresh_menu()
 
 func _refresh_board_style_ui() -> void:
 	if duboo_mode:
@@ -2245,6 +2902,7 @@ func _toggle_auto_battle() -> void:
 	auto_battle = not auto_battle
 	auto_advance_time = -1.0
 	auto_battle_button.text = "AUTO BATTLE  ON" if auto_battle else "AUTO BATTLE  OFF"
+	_mobile_refresh_menu()
 	_new_match()
 	if sound_click != null:
 		sound_click.play()
@@ -2328,6 +2986,10 @@ func _new_match() -> void:
 	pending_queen = -1
 	winner = -1
 	rival_match_recorded = false
+	result_first_clear = false
+	result_reason = ""
+	if result_overlay != null:
+		result_overlay.hide()
 	if auto_battle:
 		_choose_auto_rival()
 	_refresh_rival_card()
@@ -2383,6 +3045,7 @@ func _begin_board() -> void:
 		_auto_begin_turn()
 	_refresh_ui()
 	board.queue_redraw()
+	_save_match_snapshot()
 
 func _add_disc(kind: String, at: Vector2, id_number: int) -> void:
 	discs.append({"id": id_number, "kind": kind, "pos": at, "vel": Vector2.ZERO, "radius": PHYSICS.radius_for(kind, duboo_mode), "mass": PHYSICS.coin_mass(kind, duboo_mode), "pocketed": false})
@@ -2416,10 +3079,10 @@ func _set_status(title: String, message: String) -> void:
 	_mobile_sync()
 
 func _refresh_ui() -> void:
-	main_score_white.text = str(_pocketed_count("white")) if duboo_mode else str(totals[0])
-	main_score_black.text = str(_pocketed_count("black")) if duboo_mode else str(totals[1])
-	coins_white.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("white")
-	coins_black.text = "OF 9 POCKETED" if duboo_mode else "%d / 9 pocketed" % _pocketed_count("black")
+	main_score_white.text = str(_pocketed_count("white"))
+	main_score_black.text = str(_pocketed_count("black"))
+	coins_white.text = "OF 9 POCKETED"
+	coins_black.text = "OF 9 POCKETED"
 	if duboo_mode:
 		match_info.text = "DUBOO / RIVAL VS RIVAL" if auto_battle else "DUBOO / ONE BOARD"
 	elif MAX_BOARD_COUNT == 1:
@@ -2651,6 +3314,14 @@ func _mobile_handle_mouse(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 func _input(event: InputEvent) -> void:
+	if tutorial_overlay != null and tutorial_overlay.visible:
+		return
+	if result_overlay != null and result_overlay.visible:
+		# Do not let the board's global touch handler swallow result button taps.
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			result_overlay.hide()
+			get_viewport().set_input_as_handled()
+		return
 	if rules_overlay != null and rules_overlay.visible:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_close_rules()
@@ -2659,6 +3330,11 @@ func _input(event: InputEvent) -> void:
 	if mobile_menu_open:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_mobile_close_menu()
+			get_viewport().set_input_as_handled()
+		return
+	if mobile_rival_drawer_scrim != null and mobile_rival_drawer_scrim.visible:
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_mobile_close_rival_drawer()
 			get_viewport().set_input_as_handled()
 		return
 	if not portrait_touch:
@@ -2679,6 +3355,8 @@ func _input(event: InputEvent) -> void:
 		_mobile_handle_mouse(event)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if tutorial_overlay != null and tutorial_overlay.visible:
+		return
 	if portrait_touch:
 		return
 	if rules_overlay.visible:
@@ -2986,9 +3664,13 @@ func _resolve_shot() -> void:
 		_set_status("CPU TURN  /  BLACK", result + " %s is choosing a shot." % str(RIVALS[rival_index]["alias"]))
 	_refresh_ui()
 	board.queue_redraw()
+	_save_match_snapshot()
 
 func _end_board(board_winner: int, reason: String) -> void:
 	winner = board_winner
+	result_reason = reason
+	var previous_record: Array = rival_results.get(_rival_key(), [0, 0, 0])
+	result_first_clear = not auto_battle and board_winner == 0 and int(previous_record[0]) == 0
 	if duboo_mode:
 		phase = "match_over"
 		if not auto_battle:
@@ -2997,7 +3679,9 @@ func _end_board(board_winner: int, reason: String) -> void:
 		board.show_aim = false
 		_set_status("%s WINS DUBOO!" % _rival_alias_for_player(board_winner) if auto_battle else ("YOU WIN DUBOO!" if board_winner == 0 else "CPU WINS DUBOO"), reason + "  Select NEW BOARD to play again.")
 		_refresh_ui()
+		_show_match_result()
 		board.queue_redraw()
+		_save_match_snapshot()
 		return
 	var opponent_left := 9 - _pocketed_count(_kind_for(1 - board_winner))
 	var gain := maxi(1, opponent_left)
@@ -3011,7 +3695,7 @@ func _end_board(board_winner: int, reason: String) -> void:
 	board.display_striker = false
 	board.show_aim = false
 	var board_winner_text := ("%s WINS THE BOARD!" % _rival_alias_for_player(board_winner)) if auto_battle else ("YOU WIN THE BOARD!" if board_winner == 0 else "CPU WINS THE BOARD")
-	board_finished_message = "%s  +%d POINTS  |  %s" % [board_winner_text, gain, reason]
+	board_finished_message = "%s  |  %s" % [board_winner_text, reason]
 	var match_over := totals[board_winner] >= MATCH_TARGET or board_number >= MAX_BOARD_COUNT
 	if match_over:
 		phase = "match_over"
@@ -3019,13 +3703,17 @@ func _end_board(board_winner: int, reason: String) -> void:
 		if not auto_battle:
 			_record_rival_match(2 if totals[0] == totals[1] else match_winner)
 		if totals[0] == totals[1]:
-			_set_status("RIVALS TIED" if auto_battle else "MATCH TIED", "Match ends level. Select NEW MATCH to play again." if auto_battle else "Eight boards completed with equal points. Select NEW MATCH to play again.")
+			winner = -1
+			result_first_clear = false
+			_set_status("RIVALS TIED" if auto_battle else "MATCH TIED", "Match ends level. Select NEW MATCH to play again." if auto_battle else "Board ends level. Select NEW MATCH to play again.")
 		else:
 			_set_status("%s WINS!" % _rival_alias_for_player(match_winner) if auto_battle else ("YOU WIN THE MATCH!" if match_winner == 0 else "CPU WINS THE MATCH"), board_finished_message + "  Select NEW MATCH to play again.")
 	else:
 		_set_status("BOARD COMPLETE", board_finished_message + "  Select NEXT BOARD to continue.")
 	_refresh_ui()
+	_show_match_result()
 	board.queue_redraw()
+	_save_match_snapshot()
 
 func _next_board() -> void:
 	if phase != "board_over":
@@ -3283,9 +3971,11 @@ func _cpu_predict(candidate: Dictionary) -> float:
 	striker["vel"] = (candidate["dir"] as Vector2) * float(candidate["speed"])
 	striker["pocketed"] = false
 	var feedback: Array = []
-	var dt := 1.0 / 48.0
-	var steps: int = 402 if duboo_mode else 250
-	var substeps: int = 3 if duboo_mode else 2
+	# Match live _physics_process() tick and collision substeps. Maintain
+	# approximately the same prediction horizon even if physics FPS changes.
+	var dt := 1.0 / float(Engine.physics_ticks_per_second)
+	var steps: int = ceili((402.0 if duboo_mode else 250.0) * float(Engine.physics_ticks_per_second) / 48.0)
+	var substeps: int = 4 if duboo_mode else 2
 	for step in range(steps):
 		for _j in range(substeps):
 			PHYSICS.advance(test, dt / float(substeps), duboo_mode, feedback)

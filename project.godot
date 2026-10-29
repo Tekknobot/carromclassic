@@ -10,16 +10,16 @@ config_version=5
 
 [application]
 
-config/name="CARROM"
-config/description="Top-down 2D carrom with a mouse-first striker, classic rules and a shot-planning CPU."
+config/name="CARROM CLASSIC"
+config/description="CARROM CLASSIC — a premium offline tabletop game with Classic Carrom, Duboo and distinctive CPU rivals."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
-run/max_fps=30
-boot_splash/bg_color=Color(0, 0, 0, 1)
+run/max_fps=60
+boot_splash/bg_color=Color(0.0627451, 0.13725491, 0.1254902, 1)
 boot_splash/stretch_mode=0
-boot_splash/image="uid://dbd70kk1agqkh"
+boot_splash/image="res://store_assets/splash.png"
 config/icon="res://icon.svg"
-boot_splash/minimum_display_time=2000
+boot_splash/minimum_display_time=2700
 
 [display]
 
